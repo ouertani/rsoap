@@ -153,7 +153,7 @@ unsafe_code  = "deny"
 
 ## Limitations
 
-- The string-based WSDL parser is tolerant of real-world WSDL quirks (namespace prefixes, self-closing tags, attributes between tag name and `>`) but is not a full XML schema validator. Malformed WSDLs may produce surprising results.
+- The macro uses a lightweight XML walker tuned for WSDL — it handles namespace prefixes (`xs:`, `xsd:`, `wsdlsoap:`), self-closing tags (`<xs:element name="x"/>`), and attributes on opening tags. It is not a general XML schema validator: CDATA sections, comments containing tag-like text, or pathological nesting (same-name elements nested inside themselves) may confuse it. Standard WSDLs from SoapUI, WSDL2Java, .NET, and similar tools work correctly.
 - SOAP 1.1 only. SOAP 1.2 is not yet supported.
 - No MTOM / attachments.
 - `rsoap-macros` reads the WSDL at compile time, so the file path must be valid relative to the crate root where `#[derive]` is invoked.
