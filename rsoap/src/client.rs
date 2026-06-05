@@ -5,7 +5,9 @@
 //! at runtime.
 
 use crate::envelope::{self, SoapVersion};
-use crate::error::{CertError, SoapError};
+#[cfg(feature = "wss")]
+use crate::error::CertError;
+use crate::error::SoapError;
 use reqwest::Client as HttpClient;
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
