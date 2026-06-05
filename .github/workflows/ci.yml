@@ -29,6 +29,9 @@ jobs:
       - name: Build
         run: cargo build --workspace --all-targets
 
+      - name: Build (wss feature)
+        run: cargo build -p rsoap --features wss --all-targets
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -46,6 +49,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Clippy (wss feature)
+        run: cargo clippy -p rsoap --features wss --all-targets -- -D warnings
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -60,6 +66,9 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --all-targets
+
+      - name: Test (wss feature)
+        run: cargo test -p rsoap --features wss --all-targets
 
   publish-check:
     name: Publish dry-run

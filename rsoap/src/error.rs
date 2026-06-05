@@ -46,6 +46,12 @@ pub enum SoapError {
     /// Missing or invalid endpoint URL.
     #[error("no endpoint URL configured for Soap client")]
     NoEndpoint,
+
+    /// Failed to load a client certificate for mTLS (two-way SSL) authentication.
+    /// Returned by [`crate::SoapClient::with_client_cert`] when the file cannot
+    /// be read, the password is wrong, or the bundle is not a valid PKCS#12.
+    #[error("failed to load client certificate: {0}")]
+    CertLoad(String),
 }
 
 impl SoapError {

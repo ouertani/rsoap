@@ -26,7 +26,7 @@ Add the runtime crate and the derive macro to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rsoap = { path = "../rsoap" }
+rsoap = { path = "../rsoap", features = ["wss"] }  # omit "wss" if you don't need mTLS
 rsoap-macros = { path = "../rsoap-macros" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
@@ -56,6 +56,19 @@ async fn main() -> anyhow::Result<()> {
 
 The macro reads the WSDL, resolves the `GetTemperature` operation, generates `gettemperature::Request` and `gettemperature::Response` with `#[serde(rename = "...")]` on every field, and implements `SoapOperation` for the marker struct.
 
+### Two-way SSL / mutual TLS (WS-Security)
+
+For services that require client certificates ("Services will be available only over two-way SSL over HTTP"), enable the `wss` feature and pass a PEM-encoded cert + key to the client:
+
+```rust,ignore
+use rsoap::SoapClient;
+
+let client = SoapClient::new("https://example.com/soap")?
+    .with_client_cert("/path/to/client.pem")?;
+```
+
+The certificate is presented on every request, satisfying the transport-binding requirement of OASIS WSS 1.1. For PKCS#12 (.p12 / .pfx) bundles, build the `reqwest::Identity` yourself (requires reqwest's `default-tls` feature) and use `SoapClient::with_identity`.
+
 ---
 
 ## Features
@@ -66,6 +79,7 @@ The macro reads the WSDL, resolves the `GetTemperature` operation, generates `ge
 - **XSD → Rust type mapping** — `xs:string` → `String`, `xs:int` → `i32`, `xs:long` → `i64`, `xs:float`/`xs:double`/`xs:decimal` → `f64`, `xs:boolean` → `bool`, `xs:date`/`xs:dateTime` → `String`.
 - **SOAP 1.1 & 1.2 support** — version is per-operation (`const VERSION: SoapVersion`) and auto-detected from the WSDL binding namespace. 1.1 uses `text/xml` + `SOAPAction`; 1.2 uses `application/soap+xml` with the action in the Content-Type parameter, and parses the 1.2 fault structure (`<Code><Value>` / `<Reason><Text>`).
 - **Fault detection on any HTTP status** — non-2xx responses are still read and checked for a SOAP fault body before reporting `HttpStatus`.
+- **WS-Security transport binding (mTLS)** — opt-in via the `wss` Cargo feature. Loads a PEM-encoded client certificate + key and presents it on every request, matching the "two-way SSL over HTTP" requirement from OASIS WSS 1.1.
 - **Custom headers** — `.with_header(name, value)` for auth, tracing, etc.
 - **Namespace-prefix tolerant** — handles `xs:`, `xsd:`, `wsdl:`, `soap:`, `wsdlsoap:`, `env:`, and bare tags in WSDLs.
 

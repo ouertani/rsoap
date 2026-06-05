@@ -110,6 +110,60 @@ impl SoapClient {
         self
     }
 
+    /// Configure a client certificate (mTLS / two-way SSL) for WS-Security
+    /// transport authentication.
+    ///
+    /// Loads a PEM-encoded client certificate + private key bundle from
+    /// `path` and rebuilds the underlying HTTP client to present that
+    /// certificate on every request.  The PEM file must contain both the
+    /// certificate chain and the private key (in that order, or interleaved).
+    /// Protect the file with filesystem permissions — there is no password
+    /// support in this entry point.  For PKCS#12 bundles, use reqwest's
+    /// `default-tls` feature and call `reqwest::Identity::from_pkcs12_der`
+    /// yourself, then attach via `with_identity`.
+    ///
+    /// This implements the transport-binding portion of WS-Security as
+    /// described by OASIS WSS 1.1 — "Services will be available only over
+    /// two-way SSL over HTTP. The requestor opens a connection to the Web
+    /// service using a secure transport, i.e., SSL. In this scenario, the
+    /// message confidentiality and integrity are handled using the existing
+    /// transport security mechanisms."
+    ///
+    /// Other WSS profiles (UsernameToken, X.509 signing, encryption) are not
+    /// yet supported — open an issue if you need them.
+    ///
+    /// # Errors
+    /// Returns [`SoapError::CertLoad`] if the file cannot be read or the
+    /// bundle is not a valid PEM-encoded certificate + key.
+    #[cfg(feature = "wss")]
+    pub fn with_client_cert(
+        mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, SoapError> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path)
+            .map_err(|e| SoapError::CertLoad(format!("read {}: {e}", path.display())))?;
+        let identity = reqwest::Identity::from_pem(&bytes)
+            .map_err(|e| SoapError::CertLoad(format!("parse PEM: {e}")))?;
+        self.http = reqwest::Client::builder()
+            .identity(identity)
+            .build()
+            .map_err(|e| SoapError::CertLoad(format!("build HTTP client: {e}")))?;
+        Ok(self)
+    }
+
+    /// Attach a pre-built `reqwest::Identity` for mTLS / two-way SSL.
+    /// Use this if you need PKCS#12 (requires reqwest's `default-tls` feature)
+    /// or want to load the identity from a non-file source.
+    #[cfg(feature = "wss")]
+    pub fn with_identity(mut self, identity: reqwest::Identity) -> Result<Self, SoapError> {
+        self.http = reqwest::Client::builder()
+            .identity(identity)
+            .build()
+            .map_err(|e| SoapError::CertLoad(format!("build HTTP client: {e}")))?;
+        Ok(self)
+    }
+
     /// Send a soap request using a typed operation and return the deserialized response.
     ///
     /// Automatically detects soap faults and converts them to [`SoapError::SoapFault`].
@@ -278,5 +332,43 @@ mod tests {
         let body = envelope::extract_body(xml).unwrap();
         assert!(body.contains("GetWeatherResponse"));
         assert!(body.contains("72"));
+    }
+
+    #[cfg(feature = "wss")]
+    #[test]
+    fn with_client_cert_errors_on_missing_file() {
+        let result = SoapClient::new("https://example.com/soap")
+            .unwrap()
+            .with_client_cert("/nonexistent/path/to/cert.pem");
+        match result {
+            Err(SoapError::CertLoad(msg)) => assert!(
+                msg.contains("read") || msg.contains("No such file"),
+                "expected read error, got: {msg}"
+            ),
+            other => panic!("expected CertLoad, got {:?}", other),
+        }
+    }
+
+    #[cfg(feature = "wss")]
+    #[test]
+    fn with_client_cert_errors_on_invalid_pem() {
+        // Write a non-PEM file to a temp path.
+        let dir = std::env::temp_dir().join("rsoap_wss_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("not_a_cert.pem");
+        std::fs::write(&path, b"this is not a PEM file").unwrap();
+
+        let result = SoapClient::new("https://example.com/soap")
+            .unwrap()
+            .with_client_cert(&path);
+        match result {
+            Err(SoapError::CertLoad(msg)) => assert!(
+                msg.contains("PEM") || msg.contains("parse"),
+                "expected parse error, got: {msg}"
+            ),
+            other => panic!("expected CertLoad, got {:?}", other),
+        }
+
+        let _ = std::fs::remove_file(&path);
     }
 }

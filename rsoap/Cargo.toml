@@ -25,6 +25,9 @@ tokio = { workspace = true, optional = true }
 [features]
 default = ["blocking"]
 blocking = ["tokio/full"]
+# WS-Security: enables client-certificate (mTLS) authentication for two-way SSL.
+# More WSS profiles (UsernameToken, XML signatures) are planned.
+wss = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
