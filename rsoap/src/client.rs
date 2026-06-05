@@ -5,6 +5,8 @@
 //! at runtime.
 
 use crate::envelope::{self, SoapVersion};
+#[cfg(feature = "wss")]
+use crate::error::CertError;
 use crate::error::SoapError;
 use reqwest::Client as HttpClient;
 use serde::{de::DeserializeOwned, Serialize};
@@ -72,6 +74,8 @@ pub trait SoapOperation {
 /// A configured SOAP client ready to make requests.
 ///
 /// Create with [`SoapClient::new`] and customize headers/builders before use.
+#[derive(Clone)]
+#[must_use]
 pub struct SoapClient {
     http: HttpClient,
     endpoint: String,
@@ -133,34 +137,43 @@ impl SoapClient {
     /// yet supported — open an issue if you need them.
     ///
     /// # Errors
-    /// Returns [`SoapError::CertLoad`] if the file cannot be read or the
-    /// bundle is not a valid PEM-encoded certificate + key.
+    /// Returns [`SoapError::CertLoad`] with a [`CertError`] source if the
+    /// file cannot be read or the bundle is not a valid PEM-encoded
+    /// certificate + key.
     #[cfg(feature = "wss")]
     pub fn with_client_cert(
         mut self,
         path: impl AsRef<std::path::Path>,
     ) -> Result<Self, SoapError> {
         let path = path.as_ref();
-        let bytes = std::fs::read(path)
-            .map_err(|e| SoapError::CertLoad(format!("read {}: {e}", path.display())))?;
+        let bytes = std::fs::read(path).map_err(|source| {
+            SoapError::CertLoad(CertError::ReadCertFile {
+                path: path.to_path_buf(),
+                source,
+            })
+        })?;
         let identity = reqwest::Identity::from_pem(&bytes)
-            .map_err(|e| SoapError::CertLoad(format!("parse PEM: {e}")))?;
+            .map_err(|source| SoapError::CertLoad(CertError::ParsePem(source)))?;
         self.http = reqwest::Client::builder()
             .identity(identity)
             .build()
-            .map_err(|e| SoapError::CertLoad(format!("build HTTP client: {e}")))?;
+            .map_err(|source| SoapError::CertLoad(CertError::BuildClient(source)))?;
         Ok(self)
     }
 
     /// Attach a pre-built `reqwest::Identity` for mTLS / two-way SSL.
     /// Use this if you need PKCS#12 (requires reqwest's `default-tls` feature)
     /// or want to load the identity from a non-file source.
+    ///
+    /// # Errors
+    /// Returns [`SoapError::CertLoad`] wrapping [`CertError::BuildClient`]
+    /// if the underlying HTTP client cannot be rebuilt.
     #[cfg(feature = "wss")]
     pub fn with_identity(mut self, identity: reqwest::Identity) -> Result<Self, SoapError> {
         self.http = reqwest::Client::builder()
             .identity(identity)
             .build()
-            .map_err(|e| SoapError::CertLoad(format!("build HTTP client: {e}")))?;
+            .map_err(|source| SoapError::CertLoad(CertError::BuildClient(source)))?;
         Ok(self)
     }
 
@@ -341,18 +354,17 @@ mod tests {
             .unwrap()
             .with_client_cert("/nonexistent/path/to/cert.pem");
         match result {
-            Err(SoapError::CertLoad(msg)) => assert!(
-                msg.contains("read") || msg.contains("No such file"),
-                "expected read error, got: {msg}"
-            ),
-            other => panic!("expected CertLoad, got {:?}", other),
+            Err(SoapError::CertLoad(CertError::ReadCertFile { path, source })) => {
+                assert_eq!(path, std::path::Path::new("/nonexistent/path/to/cert.pem"));
+                assert!(matches!(source.kind(), std::io::ErrorKind::NotFound));
+            }
+            other => panic!("expected CertLoad(ReadCertFile), got {:?}", other),
         }
     }
 
     #[cfg(feature = "wss")]
     #[test]
     fn with_client_cert_errors_on_invalid_pem() {
-        // Write a non-PEM file to a temp path.
         let dir = std::env::temp_dir().join("rsoap_wss_test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("not_a_cert.pem");
@@ -362,11 +374,8 @@ mod tests {
             .unwrap()
             .with_client_cert(&path);
         match result {
-            Err(SoapError::CertLoad(msg)) => assert!(
-                msg.contains("PEM") || msg.contains("parse"),
-                "expected parse error, got: {msg}"
-            ),
-            other => panic!("expected CertLoad, got {:?}", other),
+            Err(SoapError::CertLoad(CertError::ParsePem(_))) => {}
+            other => panic!("expected CertLoad(ParsePem), got {:?}", other),
         }
 
         let _ = std::fs::remove_file(&path);
