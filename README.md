@@ -1,6 +1,6 @@
 # rsoap
 
-![Rust](https://img.shields.io/badge/rust-1.75%2B-brightgreen.svg)
+![Rust](https://img.shields.io/badge/rust-1.95%2B-brightgreen.svg)
 [![Version](https://img.shields.io/crates/v/rsoap.svg)](https://crates.io/crates/rsoap)
 [![Docs.rs](https://docs.rs/rsoap/badge.svg)](https://docs.rs/rsoap)
 [![License](https://img.shields.io/crates/l/rsoap.svg)](LICENSE)
