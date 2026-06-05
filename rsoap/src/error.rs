@@ -5,9 +5,19 @@ use thiserror::Error;
 /// The primary error type for Soap operations.
 #[derive(Debug, Error)]
 pub enum SoapError {
-    /// HTTP request failed.
+    /// HTTP transport-level failure (connection, timeout, TLS, etc.).
+    /// Wraps the underlying [`reqwest::Error`] for full source-chain visibility.
     #[error("HTTP error: {0}")]
-    Http(String),
+    Http(#[from] reqwest::Error),
+
+    /// Server returned a non-success HTTP status code.
+    #[error("HTTP {code}: {reason}")]
+    HttpStatus {
+        /// The numeric HTTP status code (e.g., 500).
+        code: u16,
+        /// The canonical reason phrase (e.g., "Internal Server Error").
+        reason: String,
+    },
 
     /// Failed to serialize the request XML.
     #[error("failed to serialize request: {0}")]
@@ -18,7 +28,7 @@ pub enum SoapError {
     DeserializeResponse(#[source] Box<quick_xml::de::DeError>),
 
     /// The SOAP envelope contained a fault from the server.
-    #[error("Soap fault: [{code}] {message}")]
+    #[error("soap fault: [{code}] {message}")]
     SoapFault {
         /// The WSDL-defined fault code (e.g., "Client", "Server").
         code: String,
@@ -38,20 +48,13 @@ pub enum SoapError {
     NoEndpoint,
 }
 
-impl From<reqwest::Error> for SoapError {
-    fn from(err: reqwest::Error) -> Self {
-        Self::Http(err.to_string())
-    }
-}
-
 impl SoapError {
-    /// Construct a `SoapError::Http` from an HTTP status code.
-    pub fn http(status: reqwest::StatusCode) -> Self {
-        Self::Http(format!(
-            "HTTP {}: {}",
-            status.as_u16(),
-            status.canonical_reason().unwrap_or("Unknown")
-        ))
+    /// Construct a `SoapError::HttpStatus` from an HTTP status code.
+    pub fn http_status(status: reqwest::StatusCode) -> Self {
+        Self::HttpStatus {
+            code: status.as_u16(),
+            reason: status.canonical_reason().unwrap_or("Unknown").to_string(),
+        }
     }
 
     /// Construct a `SoapError::SerializeRequest` from an XML serialization error.

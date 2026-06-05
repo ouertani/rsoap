@@ -53,7 +53,8 @@ pub trait SoapOperation {
     {
         // Check for soap fault before deserializing
         if is_soap_fault(response_xml) {
-            let (code, message) = parse_soap_error(response_xml)?;
+            let (code, message) = envelope::parse_soap_fault(response_xml)
+                .map_err(|e| SoapError::DeserializeResponse(Box::new(e)))?;
             return Err(SoapError::SoapFault { code, message });
         }
 
@@ -65,32 +66,6 @@ pub trait SoapOperation {
 /// Check if XML appears to be a soap fault response.
 fn is_soap_fault(xml: &str) -> bool {
     xml.contains("<soap:Fault") || xml.contains("<Fault xmlns=")
-}
-
-/// Try to parse soap fault info from an XML string.
-fn parse_soap_error(xml: &str) -> Result<(String, String), SoapError> {
-    #[derive(Debug, serde::Deserialize)]
-    struct Fault {
-        faultcode: Option<String>,
-        faultstring: Option<FaultString>,
-    }
-
-    #[derive(Debug, serde::Deserialize)]
-    struct FaultString {
-        #[serde(rename = "$text")]
-        value: String,
-    }
-
-    let fault: Fault = envelope::deserialize_response(xml)
-        .map_err(|e| SoapError::DeserializeResponse(Box::new(e)))?;
-
-    Ok((
-        fault.faultcode.unwrap_or_else(|| "unknown".to_string()),
-        fault
-            .faultstring
-            .map(|s| s.value)
-            .unwrap_or_else(|| "no details".to_string()),
-    ))
 }
 
 /// A configured SOAP client ready to make requests.
@@ -112,7 +87,7 @@ impl SoapClient {
 
         // Validate that the URL is parseable by reqwest's internal parser.
         if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
-            return Err(SoapError::http(reqwest::StatusCode::BAD_REQUEST));
+            return Err(SoapError::http_status(reqwest::StatusCode::BAD_REQUEST));
         }
 
         Ok(Self {
@@ -169,7 +144,7 @@ impl SoapClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            return Err(SoapError::http(status));
+            return Err(SoapError::http_status(status));
         }
 
         let text = response.text().await?;
@@ -275,7 +250,7 @@ mod tests {
             </soap:Body>
         </soap:Envelope>"#;
 
-        let (code, message) = super::parse_soap_error(xml).unwrap();
+        let (code, message) = envelope::parse_soap_fault(xml).unwrap();
         assert_eq!(code, "Server");
         assert_eq!(message, "Invalid credentials");
     }
