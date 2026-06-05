@@ -1,6 +1,20 @@
 [workspace]
 members = ["rsoap", "rsoap-macros", "examples"]
-resolver = "3"
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+authors = ["Slim Ouertani <ouertani@gmail.com>"]
+description = "A SOAP client library for Rust with compile-time code generation from WSDL files"
+homepage = "https://github.com/ouertani/rsoap"
+repository = "https://github.com/ouertani/rsoap"
+documentation = "https://docs.rs/rsoap"
+readme = "README.md"
+keywords = ["soap", "wsdl", "client", "proc-macro", "codegen"]
+categories = ["api-bindings", "development-tools::procedural-macro-helpers", "encoding"]
 
 [workspace.lints.clippy]
 all = { level = "warn" }
@@ -26,3 +40,10 @@ reqwest = { version = "0.12", default-features = false, features = [
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 quick-xml = { version = "0.38", features = ["serialize"] }
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+lto = true

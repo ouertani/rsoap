@@ -1,8 +1,10 @@
 [package]
 name = "rsoap-examples"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 publish = false
+description = "Demo binary for the rsoap workspace"
+license.workspace = true
 
 [dependencies]
 rsoap = { path = "../rsoap" }
