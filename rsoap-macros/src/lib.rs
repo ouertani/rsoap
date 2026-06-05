@@ -20,6 +20,7 @@ struct WsdlField {
 }
 
 /// Parsed SOAP operation from WSDL.
+#[allow(dead_code)]
 struct WsdlOperation {
     name: String,
     action: String,
@@ -55,6 +56,7 @@ fn parse_message(content: &str) -> Option<WsdlMessage> {
 }
 
 /// A parsed WSDL document with operations and an XSD element map.
+#[allow(dead_code)]
 struct ParsedWsdl {
     target_namespace: String,
     xsd_prefix: Option<String>,
@@ -455,7 +457,7 @@ pub fn soap_operation(input: TokenStream) -> TokenStream {
         })
         .expect("`#[soap(wsdl = \"...\", operation_name = \"...\")]` attribute is required");
 
-    let attrs = extract_soap_meta(&soap_attr);
+    let attrs = extract_soap_meta(soap_attr);
     let wsdl_path = attrs.get("wsdl").cloned();
     let operation_name = attrs.get("operation_name").cloned().unwrap_or_default();
 
@@ -564,13 +566,8 @@ fn extract_tag_contents(wsdl: &str, tag: &str) -> Vec<TagMatch> {
     let mut result   = Vec::new();
     let mut search_start = 0usize;
 
-    loop {
-        // Locate the next opening tag (handles bare + namespaced prefixes)
-        let tag_start = match wsdl[search_start..].find(&open_pat) {
-            Some(pos) => pos + search_start,
-            None      => break,
-        };
-
+    while let Some(rel) = wsdl[search_start..].find(&open_pat) {
+        let tag_start = rel + search_start;
         let after_tag = &wsdl[tag_start + open_pat.len()..];
 
         // Find the first `>` after the tag name.  If the char before it is
