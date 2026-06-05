@@ -9,6 +9,9 @@ use quote::{format_ident, quote};
 use syn::punctuated::Punctuated;
 use syn::{parse::ParseStream, parse_macro_input, DeriveInput, MetaNameValue, Token};
 
+/// The SOAP 1.2 binding namespace URI as it appears in WSDL files.
+const SOAP12_BINDING_NS: &str = "http://schemas.xmlsoap.org/wsdl/soap12/";
+
 // ─────────── Data structures ───────────
 
 /// A single struct field derived from WSDL / XSD.
@@ -28,6 +31,9 @@ struct WsdlOperation {
     endpoint: String,
     namespace: String,
     body_element: String,
+    /// `true` if the WSDL uses the SOAP 1.2 binding namespace,
+    /// `false` for SOAP 1.1 (the default).
+    is_soap12: bool,
     request_fields: Vec<WsdlField>,
     response_fields: Vec<WsdlField>,
 }
@@ -210,6 +216,11 @@ impl ParsedWsdl {
         let wsdl_ns_prefix = detect_ns_prefix(wsdl, "http://schemas.xmlsoap.org/wsdl/");
         let xsd_prefix = detect_ns_prefix(wsdl, "http://www.w3.org/2001/XMLSchema");
 
+        // Detect SOAP version from the binding namespace declared on <definitions>.
+        // If `http://schemas.xmlsoap.org/wsdl/soap12/` is referenced, this is a 1.2
+        // WSDL; otherwise default to 1.1.
+        let is_soap12 = wsdl.contains(SOAP12_BINDING_NS);
+
         // Build the XSD element map before parsing operations so it's ready.
         let elements = build_element_map(wsdl);
 
@@ -218,7 +229,9 @@ impl ParsedWsdl {
 
         let mut operations = Vec::new();
         for op in &op_blocks {
-            if let Ok(parsed) = parse_single_operation(op, wsdl, &target_namespace, &elements) {
+            if let Ok(parsed) =
+                parse_single_operation(op, wsdl, &target_namespace, &elements, is_soap12)
+            {
                 operations.push(parsed);
             }
         }
@@ -246,6 +259,7 @@ fn parse_single_operation(
     wsdl: &str,    // entire WSDL (for soap:address / global messages)
     namespace: &str,
     elements: &std::collections::HashMap<String, Vec<WsdlField>>,
+    is_soap12: bool,
 ) -> Result<WsdlOperation, String> {
     let name = extract_attribute(&op.open, "name")
         .ok_or_else(|| "Could not find operation name".to_string())?;
@@ -281,6 +295,7 @@ fn parse_single_operation(
         endpoint: address,
         namespace: namespace.to_string(),
         body_element: format!("{name}Request"),
+        is_soap12,
         request_fields,
         response_fields,
     })
@@ -401,6 +416,11 @@ fn generate_from_wsdl(op: &WsdlOperation, struct_name: &syn::Ident) -> TokenStre
 
     let action = &op.action;
     let endpoint = &op.endpoint;
+    let version = if op.is_soap12 {
+        quote! { ::rsoap::SoapVersion::V12 }
+    } else {
+        quote! { ::rsoap::SoapVersion::V11 }
+    };
 
     quote! {
         /// Generated request and response types for the #action operation.
@@ -428,6 +448,7 @@ fn generate_from_wsdl(op: &WsdlOperation, struct_name: &syn::Ident) -> TokenStre
             const ACTION:         &'static str = #action;
             const ENDPOINT:       &'static str = #endpoint;
             const BODY_ELEMENT:   &'static str = #body_element;
+            const VERSION:        ::rsoap::SoapVersion = #version;
         }
     }
 }
@@ -827,5 +848,51 @@ mod tests {
             !op.request_fields.is_empty(),
             "should resolve at least one request field"
         );
+    }
+
+    #[test]
+    fn detects_soap12_from_binding_namespace() {
+        let wsdl_11 = r#"<?xml version="1.0"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+             targetNamespace="http://example.com/foo">
+  <portType name="PT">
+    <operation name="Op1"><input message="m:I"/></operation>
+  </portType>
+  <binding name="B" type="t:PT">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="Op1"/>
+  </binding>
+</definitions>"#;
+
+        let wsdl_12 = r#"<?xml version="1.0"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/"
+             targetNamespace="http://example.com/foo">
+  <portType name="PT">
+    <operation name="Op1"><input message="m:I"/></operation>
+  </portType>
+  <binding name="B" type="t:PT">
+    <soap12:binding transport="http://www.w3.org/2003/05/soap/bindings/HTTP"/>
+    <operation name="Op1"/>
+  </binding>
+</definitions>"#;
+
+        let parsed_11 = ParsedWsdl::parse(wsdl_11);
+        let parsed_12 = ParsedWsdl::parse(wsdl_12);
+
+        let op_11 = parsed_11
+            .operations
+            .iter()
+            .find(|op| op.name == "Op1")
+            .expect("Op1 not found in 1.1 WSDL");
+        let op_12 = parsed_12
+            .operations
+            .iter()
+            .find(|op| op.name == "Op1")
+            .expect("Op1 not found in 1.2 WSDL");
+
+        assert!(!op_11.is_soap12, "1.1 WSDL should be detected as V11");
+        assert!(op_12.is_soap12, "1.2 WSDL should be detected as V12");
     }
 }

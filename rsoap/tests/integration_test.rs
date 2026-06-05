@@ -1,6 +1,6 @@
 //! Integration tests for rsoap — SOAP client, envelope parsing, and code generation from WSDL.
 
-use rsoap::{SoapClient, SoapOperation};
+use rsoap::{SoapClient, SoapOperation, SoapVersion};
 
 // ---------------------------------------------------------------------------
 // Unit / smoke tests
@@ -360,4 +360,151 @@ async fn e2e_custom_headers_sent() {
         "expected successful call with auth header, got error: {:?}",
         result.err()
     );
+}
+
+// ---------------------------------------------------------------------------
+// SOAP 1.2 tests
+// ---------------------------------------------------------------------------
+
+/// A 1.2 version of the dummy operation for end-to-end SOAP 1.2 testing.
+#[derive(Debug)]
+struct TestOp12;
+
+impl SoapOperation for TestOp12 {
+    type Request = WeatherReqE2e;
+    type Response = WeatherRspE2e;
+
+    const ACTION: &'static str = "http://example.com/GetWeather12";
+    const ENDPOINT: &'static str = "http://127.0.0.1:0/mock-soap12";
+    const BODY_ELEMENT: &'static str = "GetWeather";
+    const VERSION: SoapVersion = SoapVersion::V12;
+}
+
+/// End-to-end: SOAP 1.2 request — verify Content-Type includes the action
+/// parameter and no `SOAPAction` HTTP header is sent.
+#[tokio::test]
+async fn e2e_soap12_content_type_carries_action() {
+    let mock_server = wiremock::MockServer::start().await;
+
+    let soap_response = r#"<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+            <env:Body>
+                <GetWeatherResponse>
+                    <temperature>65.0</temperature>
+                </GetWeatherResponse>
+            </env:Body>
+        </env:Envelope>"#;
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::header_regex(
+            "Content-Type",
+            r#"^application/soap\+xml; charset=utf-8; action="http://example.com/GetWeather12""#,
+        ))
+        .and(|req: &wiremock::Request| {
+            !req.headers
+                .iter()
+                .any(|(k, _)| k.as_str().eq_ignore_ascii_case("SOAPAction"))
+        })
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(soap_response))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let client = SoapClient::new(mock_server.uri()).unwrap();
+    let result: Result<WeatherRspE2e, _> = client
+        .call(
+            &TestOp12,
+            &WeatherReqE2e {
+                zip_code: "20001".into(),
+            },
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "expected successful 1.2 call, got error: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap().temperature, 65.0);
+}
+
+/// End-to-end: SOAP 1.2 request — verify envelope uses env: prefix and 1.2 namespace.
+#[tokio::test]
+async fn e2e_soap12_envelope_uses_env_namespace() {
+    let mock_server = wiremock::MockServer::start().await;
+
+    let soap_response = r#"<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+            <env:Body>
+                <GetWeatherResponse>
+                    <temperature>70.0</temperature>
+                </GetWeatherResponse>
+            </env:Body>
+        </env:Envelope>"#;
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(|req: &wiremock::Request| {
+            String::from_utf8(req.body.clone())
+                .unwrap_or_default()
+                .contains("<env:Envelope")
+                && String::from_utf8(req.body.clone())
+                    .unwrap_or_default()
+                    .contains("http://www.w3.org/2003/05/soap-envelope")
+        })
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(soap_response))
+        .mount(&mock_server)
+        .await;
+
+    let client = SoapClient::new(mock_server.uri()).unwrap();
+    let result: Result<WeatherRspE2e, _> = client
+        .call(
+            &TestOp12,
+            &WeatherReqE2e {
+                zip_code: "94101".into(),
+            },
+        )
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "expected successful 1.2 envelope call, got error: {:?}",
+        result.err()
+    );
+}
+
+/// End-to-end: SOAP 1.2 fault — server returns a 1.2 fault, client detects it.
+#[tokio::test]
+async fn e2e_soap12_fault_detected() {
+    let mock_server = wiremock::MockServer::start().await;
+
+    let soap_fault = r#"<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+            <env:Body>
+                <env:Fault>
+                    <Code><Value>env:Sender</Value></Code>
+                    <Reason><Text xml:lang="en">Invalid zip code</Text></Reason>
+                </env:Fault>
+            </env:Body>
+        </env:Envelope>"#;
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(soap_fault))
+        .mount(&mock_server)
+        .await;
+
+    let client = SoapClient::new(mock_server.uri()).unwrap();
+    let result: Result<WeatherRspE2e, _> = client
+        .call(
+            &TestOp12,
+            &WeatherReqE2e {
+                zip_code: "00000".into(),
+            },
+        )
+        .await;
+
+    assert!(result.is_err(), "expected SoapFault error for 1.2");
+    match result.unwrap_err() {
+        rsoap::SoapError::SoapFault { code, message } => {
+            assert_eq!(code, "env:Sender");
+            assert_eq!(message, "Invalid zip code");
+        }
+        other => panic!("expected SoapFault, got {:?}", other),
+    }
 }

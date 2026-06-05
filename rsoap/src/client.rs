@@ -4,7 +4,7 @@
 //! SOAP envelope construction, fault detection, and XML deserialization
 //! at runtime.
 
-use crate::envelope;
+use crate::envelope::{self, SoapVersion};
 use crate::error::SoapError;
 use reqwest::Client as HttpClient;
 use serde::{de::DeserializeOwned, Serialize};
@@ -15,7 +15,7 @@ use std::collections::HashMap;
 /// Implementing this trait allows runtime code to:
 /// - Build SOAP envelopes from typed request structs
 /// - Deserialze SOAP response XML into typed response structs
-/// - Know the operation's action, endpoint, and body element name
+/// - Know the operation's action, endpoint, body element name, and SOAP version
 pub trait SoapOperation {
     /// The request input type for this operation.
     type Request;
@@ -31,6 +31,12 @@ pub trait SoapOperation {
 
     /// The XML element name to use as the root of the body content.
     const BODY_ELEMENT: &'static str;
+
+    /// The SOAP protocol version this operation speaks.
+    /// Defaults to [`SoapVersion::V11`] for backward compatibility.
+    /// The `#[derive(SoapOperation)]` macro auto-detects this from the WSDL
+    /// (presence of `http://schemas.xmlsoap.org/wsdl/soap12/` bindings).
+    const VERSION: SoapVersion = SoapVersion::V11;
 
     /// Serialize a request struct into (soap_action, body_xml).
     fn build_request_body(
@@ -107,6 +113,8 @@ impl SoapClient {
     /// Send a soap request using a typed operation and return the deserialized response.
     ///
     /// Automatically detects soap faults and converts them to [`SoapError::SoapFault`].
+    /// Sets the `Content-Type` header and the action parameter based on the
+    /// operation's [`SoapOperation::VERSION`].
     ///
     /// # Errors
     /// Returns various [`SoapError`] variants on network, parsing, or soap fault failures.
@@ -123,12 +131,25 @@ impl SoapClient {
         let (action, body_xml) = operation
             .build_request_body(request)
             .map_err(SoapError::serialize_request)?;
-        let xml_body = envelope::build_envelope(&action, &body_xml);
+        let xml_body = envelope::build_envelope(O::VERSION, &action, &body_xml);
+
+        let content_type = match O::VERSION {
+            SoapVersion::V11 => "text/xml; charset=utf-8".to_string(),
+            SoapVersion::V12 => {
+                format!("application/soap+xml; charset=utf-8; action=\"{action}\"")
+            }
+        };
 
         let mut request_builder = self
             .http
             .post(&self.endpoint)
-            .header("Content-Type", "text/xml; charset=utf-8");
+            .header("Content-Type", content_type);
+
+        // SOAP 1.1 uses a SOAPAction HTTP header in addition to Content-Type.
+        // SOAP 1.2 carries the action in the Content-Type parameter (set above).
+        if O::VERSION == SoapVersion::V11 {
+            request_builder = request_builder.header("SOAPAction", format!("\"{action}\""));
+        }
 
         // Apply default headers.
         for (key, value) in &self.default_headers {
@@ -136,13 +157,21 @@ impl SoapClient {
         }
 
         let response = request_builder.body(xml_body).send().await?;
+        let status = response.status();
+        let text = response.text().await?;
 
-        if !response.status().is_success() {
-            let status = response.status();
+        // SOAP faults can be returned with any HTTP status (commonly 500 for server
+        // faults). Detect faults in the body first, regardless of HTTP status.
+        if envelope::is_soap_fault(&text) {
+            if let Ok((code, message)) = envelope::parse_soap_fault(&text) {
+                return Err(SoapError::SoapFault { code, message });
+            }
+        }
+
+        if !status.is_success() {
             return Err(SoapError::http_status(status));
         }
 
-        let text = response.text().await?;
         operation.parse_response(&text)
     }
 
@@ -190,12 +219,13 @@ mod tests {
     #[test]
     fn builds_envelope_for_operation() {
         let xml = envelope::build_envelope(
+            SoapVersion::V11,
             "GetTemperature",
             "<req:GetTemperature><lat>40</lat></req:GetTemperature>",
         );
         assert!(xml.contains("<soap:Envelope"));
         assert!(xml.contains("<Action"));
-        assert!(xml.contains(">GetTemperature</Action"));
+        assert!(xml.contains(">GetTemperature</Action>"));
         assert!(xml.contains("<soap:Body"));
         assert!(xml.contains("<req:GetTemperature>"));
     }
@@ -212,6 +242,7 @@ mod tests {
     #[test]
     fn is_soap_fault_detects_fault() {
         assert!(envelope::is_soap_fault("<soap:Fault>code</soap:Fault>"));
+        assert!(envelope::is_soap_fault("<env:Fault>code</env:Fault>"));
         assert!(envelope::is_soap_fault("<Fault xmlns=\"...\">msg</Fault>"));
         assert!(!envelope::is_soap_fault(
             "<GetTempResponse><temp>72</temp></GetTempResponse>"

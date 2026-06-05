@@ -64,9 +64,10 @@ The macro reads the WSDL, resolves the `GetTemperature` operation, generates `ge
 - **Typed request/response** — generated structs with `serde` rename attributes match the XSD element names.
 - **`maxOccurs="unbounded"`** — automatically wrapped in `Vec<T>`.
 - **XSD → Rust type mapping** — `xs:string` → `String`, `xs:int` → `i32`, `xs:long` → `i64`, `xs:float`/`xs:double`/`xs:decimal` → `f64`, `xs:boolean` → `bool`, `xs:date`/`xs:dateTime` → `String`.
-- **SOAP 1.1 envelopes** — `<Action>` header (WS-Addressing), fault detection on `<soap:Fault>` / `<Fault xmlns=...>`.
+- **SOAP 1.1 & 1.2 support** — version is per-operation (`const VERSION: SoapVersion`) and auto-detected from the WSDL binding namespace. 1.1 uses `text/xml` + `SOAPAction`; 1.2 uses `application/soap+xml` with the action in the Content-Type parameter, and parses the 1.2 fault structure (`<Code><Value>` / `<Reason><Text>`).
+- **Fault detection on any HTTP status** — non-2xx responses are still read and checked for a SOAP fault body before reporting `HttpStatus`.
 - **Custom headers** — `.with_header(name, value)` for auth, tracing, etc.
-- **Namespace-prefix tolerant** — handles `xs:`, `xsd:`, `wsdl:`, `soap:`, `wsdlsoap:`, and bare tags in WSDLs.
+- **Namespace-prefix tolerant** — handles `xs:`, `xsd:`, `wsdl:`, `soap:`, `wsdlsoap:`, `env:`, and bare tags in WSDLs.
 
 ---
 
@@ -153,8 +154,7 @@ unsafe_code  = "deny"
 
 ## Limitations
 
-- The macro uses a lightweight XML walker tuned for WSDL — it handles namespace prefixes (`xs:`, `xsd:`, `wsdlsoap:`), self-closing tags (`<xs:element name="x"/>`), and attributes on opening tags. It is not a general XML schema validator: CDATA sections, comments containing tag-like text, or pathological nesting (same-name elements nested inside themselves) may confuse it. Standard WSDLs from SoapUI, WSDL2Java, .NET, and similar tools work correctly.
-- SOAP 1.1 only. SOAP 1.2 is not yet supported.
+- The macro uses a lightweight XML walker tuned for WSDL — it handles namespace prefixes (`xs:`, `xsd:`, `wsdlsoap:`, `wsdlsoap12:`, `env:`), self-closing tags (`<xs:element name="x"/>`), and attributes on opening tags. It is not a general XML schema validator: CDATA sections, comments containing tag-like text, or pathological nesting (same-name elements nested inside themselves) may confuse it. Standard WSDLs from SoapUI, WSDL2Java, .NET, and similar tools work correctly.
 - No MTOM / attachments.
 - `rsoap-macros` reads the WSDL at compile time, so the file path must be valid relative to the crate root where `#[derive]` is invoked.
 

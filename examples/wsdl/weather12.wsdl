@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:wsdlsoap12="http://schemas.xmlsoap.org/wsdl/soap12/"
+             xmlns:xs="http://www.w3.org/2001/XMLSchema"
+             targetNamespace="http://example.com/weather12">
+
+  <!-- Types -->
+  <types>
+    <xs:schema targetNamespace="http://example.com/weather12">
+      <xs:element name="GetTemperatureRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="zipcode" type="xs:string"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <xs:element name="GetTemperatureResponse">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="temperature" type="xs:decimal"/>
+            <xs:element name="unit" type="xs:string"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:schema>
+  </types>
+
+  <!-- Messages -->
+  <message name="GetTemperatureRequest">
+    <part name="parameters" element="ns:GetTemperatureRequest"/>
+  </message>
+
+  <message name="GetTemperatureResponse">
+    <part name="parameters" element="ns:GetTemperatureResponse"/>
+  </message>
+
+  <!-- Port Types -->
+  <portType name="WeatherPortType12">
+    <operation name="GetTemperature">
+      <input message="ns:GetTemperatureRequest"/>
+      <output message="ns:GetTemperatureResponse"/>
+    </operation>
+  </portType>
+
+  <!-- Binding -->
+  <binding name="WeatherBinding12" type="ns:WeatherPortType12">
+    <wsdlsoap12:binding style="document" transport="http://www.w3.org/2003/05/soap/bindings/HTTP"/>
+    <operation name="GetTemperature">
+      <wsdlsoap12:operation soapAction="http://example.com/weather12/GetTemperature"/>
+      <input>
+        <wsdlsoap12:body use="literal"/>
+      </input>
+      <output>
+        <wsdlsoap12:body use="literal"/>
+      </output>
+    </operation>
+  </binding>
+
+  <!-- Service -->
+  <service name="WeatherService12">
+    <port name="WeatherPort12" binding="ns:WeatherBinding12">
+      <wsdlsoap12:address location="http://localhost:8080/weather12"/>
+    </port>
+  </service>
+
+</definitions>
