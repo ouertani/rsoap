@@ -1,8 +1,14 @@
 # rsoap
 
-A SOAP client library for Rust with compile-time code generation from WSDL files.
+![Rust](https://img.shields.io/badge/rust-1.75%2B-brightgreen.svg)
+[![Version](https://img.shields.io/crates/v/rsoap.svg)](https://crates.io/crates/rsoap)
+[![Docs.rs](https://docs.rs/rsoap/badge.svg)](https://docs.rs/rsoap)
+[![License](https://img.shields.io/crates/l/rsoap.svg)](LICENSE)
+[![Downloads](https://img.shields.io/crates/d/rsoap.svg)](https://crates.io/crates/rsoap)
 
-The `rsoap` workspace provides a runtime client (`rsoap`) and a procedural macro (`rsoap-macros`) that parses a WSDL at compile time and generates typed request/response structs, so SOAP services feel like ordinary Rust APIs.
+> A SOAP client library for Rust with compile-time code generation from WSDL files. The `rsoap` workspace provides a runtime client (`rsoap`) and a procedural macro (`rsoap-macros`) that parses a WSDL at compile time and generates typed request/response structs, so SOAP services feel like ordinary Rust APIs.
+
+---
 
 ## Workspace
 
@@ -11,6 +17,8 @@ The `rsoap` workspace provides a runtime client (`rsoap`) and a procedural macro
 | `rsoap/`        | Runtime library — `SoapClient`, `SoapOperation` trait, envelope/XML parsing, `SoapError` |
 | `rsoap-macros/` | Proc-macro crate — WSDL parser → typed struct generation          |
 | `examples/`     | Demo — weather service (hand-written `SoapOperation` impl)        |
+
+---
 
 ## Quick Start
 
@@ -48,6 +56,8 @@ async fn main() -> anyhow::Result<()> {
 
 The macro reads the WSDL, resolves the `GetTemperature` operation, generates `gettemperature::Request` and `gettemperature::Response` with `#[serde(rename = "...")]` on every field, and implements `SoapOperation` for the marker struct.
 
+---
+
 ## Features
 
 - **Compile-time WSDL parsing** — no runtime XML schema download, no manual struct definitions.
@@ -57,6 +67,8 @@ The macro reads the WSDL, resolves the `GetTemperature` operation, generates `ge
 - **SOAP 1.1 envelopes** — `<Action>` header (WS-Addressing), fault detection on `<soap:Fault>` / `<Fault xmlns=...>`.
 - **Custom headers** — `.with_header(name, value)` for auth, tracing, etc.
 - **Namespace-prefix tolerant** — handles `xs:`, `xsd:`, `wsdl:`, `soap:`, `wsdlsoap:`, and bare tags in WSDLs.
+
+---
 
 ## `SoapError`
 
@@ -72,6 +84,8 @@ pub enum SoapError {
 ```
 
 Implements `From<reqwest::Error>` for ergonomic `?` propagation.
+
+---
 
 ## `SoapOperation` trait
 
@@ -94,6 +108,8 @@ pub trait SoapOperation: Send + Sync {
 }
 ```
 
+---
+
 ## Build & Test
 
 ```bash
@@ -107,10 +123,12 @@ cargo clippy --workspace
 cargo test --workspace
 
 # Run specific test suites
-cargo test -p rsoap-macros --lib        # macro unit tests
-cargo test -p rsoap --test integration_test  # wiremock e2e tests
-cargo run -p rsoap-examples              # run the demo
+cargo test -p rsoap-macros --lib              # macro unit tests
+cargo test -p rsoap --test integration_test   # wiremock e2e tests
+cargo run -p rsoap-examples                    # run the demo
 ```
+
+---
 
 ## Configuration
 
@@ -131,6 +149,8 @@ unsafe_code  = "deny"
 
 `unsafe` is never allowed. `missing_docs` is warn-level — doc comments on public items are encouraged.
 
+---
+
 ## Limitations
 
 - The string-based WSDL parser is tolerant of real-world WSDL quirks (namespace prefixes, self-closing tags, attributes between tag name and `>`) but is not a full XML schema validator. Malformed WSDLs may produce surprising results.
@@ -138,6 +158,8 @@ unsafe_code  = "deny"
 - No MTOM / attachments.
 - `rsoap-macros` reads the WSDL at compile time, so the file path must be valid relative to the crate root where `#[derive]` is invoked.
 
+---
+
 ## License
 
-See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
