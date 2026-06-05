@@ -64,9 +64,10 @@ The macro reads the WSDL, resolves the `GetTemperature` operation, generates `ge
 - **Typed request/response** — generated structs with `serde` rename attributes match the XSD element names.
 - **`maxOccurs="unbounded"`** — automatically wrapped in `Vec<T>`.
 - **XSD → Rust type mapping** — `xs:string` → `String`, `xs:int` → `i32`, `xs:long` → `i64`, `xs:float`/`xs:double`/`xs:decimal` → `f64`, `xs:boolean` → `bool`, `xs:date`/`xs:dateTime` → `String`.
-- **SOAP 1.1 envelopes** — `<Action>` header (WS-Addressing), fault detection on `<soap:Fault>` / `<Fault xmlns=...>`.
+- **SOAP 1.1 & 1.2 support** — version is per-operation (`const VERSION: SoapVersion`) and auto-detected from the WSDL binding namespace. 1.1 uses `text/xml` + `SOAPAction`; 1.2 uses `application/soap+xml` with the action in the Content-Type parameter, and parses the 1.2 fault structure (`<Code><Value>` / `<Reason><Text>`).
+- **Fault detection on any HTTP status** — non-2xx responses are still read and checked for a SOAP fault body before reporting `HttpStatus`.
 - **Custom headers** — `.with_header(name, value)` for auth, tracing, etc.
-- **Namespace-prefix tolerant** — handles `xs:`, `xsd:`, `wsdl:`, `soap:`, `wsdlsoap:`, and bare tags in WSDLs.
+- **Namespace-prefix tolerant** — handles `xs:`, `xsd:`, `wsdl:`, `soap:`, `wsdlsoap:`, `env:`, and bare tags in WSDLs.
 
 ---
 
@@ -97,6 +98,10 @@ pub trait SoapOperation: Send + Sync {
     const ACTION: &'static str;
     const ENDPOINT: &'static str;
     const BODY_ELEMENT: &'static str;
+    /// SOAP protocol version. Defaults to V11; the derive macro auto-detects
+    /// from the WSDL binding namespace (V12 if the WSDL uses
+    /// `http://schemas.xmlsoap.org/wsdl/soap12/`).
+    const VERSION: SoapVersion = SoapVersion::V11;
 
     fn build_request_body(&self, req: &Self::Request) -> Result<(String, String), quick_xml::se::SeError> {
         let action = Self::ACTION.to_string();
@@ -105,6 +110,15 @@ pub trait SoapOperation: Send + Sync {
     }
 
     fn parse_response(&self, xml: &str) -> Result<Self::Response, SoapError> { /* default */ }
+}
+```
+
+A hand-written operation can declare a SOAP 1.2 version explicitly:
+
+```rust,ignore
+impl SoapOperation for MyOp {
+    // ...
+    const VERSION: SoapVersion = SoapVersion::V12;
 }
 ```
 
@@ -153,8 +167,7 @@ unsafe_code  = "deny"
 
 ## Limitations
 
-- The string-based WSDL parser is tolerant of real-world WSDL quirks (namespace prefixes, self-closing tags, attributes between tag name and `>`) but is not a full XML schema validator. Malformed WSDLs may produce surprising results.
-- SOAP 1.1 only. SOAP 1.2 is not yet supported.
+- The macro uses a lightweight XML walker tuned for WSDL — it handles namespace prefixes (`xs:`, `xsd:`, `wsdlsoap:`, `wsdlsoap12:`, `env:`), self-closing tags (`<xs:element name="x"/>`), and attributes on opening tags. It is not a general XML schema validator: CDATA sections, comments containing tag-like text, or pathological nesting (same-name elements nested inside themselves) may confuse it. Standard WSDLs from SoapUI, WSDL2Java, .NET, and similar tools work correctly.
 - No MTOM / attachments.
 - `rsoap-macros` reads the WSDL at compile time, so the file path must be valid relative to the crate root where `#[derive]` is invoked.
 
