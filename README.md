@@ -98,6 +98,10 @@ pub trait SoapOperation: Send + Sync {
     const ACTION: &'static str;
     const ENDPOINT: &'static str;
     const BODY_ELEMENT: &'static str;
+    /// SOAP protocol version. Defaults to V11; the derive macro auto-detects
+    /// from the WSDL binding namespace (V12 if the WSDL uses
+    /// `http://schemas.xmlsoap.org/wsdl/soap12/`).
+    const VERSION: SoapVersion = SoapVersion::V11;
 
     fn build_request_body(&self, req: &Self::Request) -> Result<(String, String), quick_xml::se::SeError> {
         let action = Self::ACTION.to_string();
@@ -106,6 +110,15 @@ pub trait SoapOperation: Send + Sync {
     }
 
     fn parse_response(&self, xml: &str) -> Result<Self::Response, SoapError> { /* default */ }
+}
+```
+
+A hand-written operation can declare a SOAP 1.2 version explicitly:
+
+```rust,ignore
+impl SoapOperation for MyOp {
+    // ...
+    const VERSION: SoapVersion = SoapVersion::V12;
 }
 ```
 

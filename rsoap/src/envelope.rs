@@ -9,8 +9,6 @@ pub const SOAP_NS_ENVELOPE: &str = "http://schemas.xmlsoap.org/soap/envelope/";
 /// The SOAP 1.2 Envelope namespace URI.
 pub const SOAP_NS_ENVELOPE_12: &str = "http://www.w3.org/2003/05/soap-envelope";
 
-const SOAP_BODY_OPEN: &str = "<soap:Body>";
-const SOAP_BODY_CLOSE: &str = "</soap:Body>";
 const BODY_OPEN: &str = "<Body>";
 const BODY_CLOSE: &str = "</Body>";
 
