@@ -44,7 +44,7 @@ pub mod error;
 // Re-export core types at crate root for ergonomic access.
 pub use self::client::{SoapClient, SoapOperation};
 pub use self::envelope::SoapVersion;
-pub use self::error::SoapError;
+pub use self::error::{CertError, SoapError};
 
 // Re-export the proc-macro so users can derive SoapOperationMacro on custom types.
 pub use rsoap_macros::SoapOperation as SoapOperationMacro;

@@ -1,5 +1,7 @@
 //! SOAP envelope construction and parsing utilities.
 
+use std::borrow::Cow;
+
 use quick_xml::de::from_str;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -18,6 +20,7 @@ const BODY_CLOSE: &str = "</Body>";
 /// for backward compatibility. Set explicitly on a hand-written operation
 /// or let the `#[derive(SoapOperation)]` macro detect it from the WSDL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum SoapVersion {
     /// SOAP 1.1 — `text/xml` Content-Type, `SOAPAction` header, `soap:Body`/`soap:Fault`.
     #[default]
@@ -108,24 +111,27 @@ pub fn deserialize_response<T: DeserializeOwned>(xml: &str) -> Result<T, quick_x
 ///
 /// Uses the SOAP 1.1 fault structure (`<faultcode>` / `<faultstring>`) for
 /// [`SoapVersion::V11`] and the SOAP 1.2 structure (`<Code><Value>` / `<Reason><Text>`)
-/// for [`SoapVersion::V12`].
+/// for [`SoapVersion::V12`].  `code` and `message` are XML-escaped so that
+/// characters like `<`, `>`, `&`, `"`, `'` do not produce malformed XML.
 pub fn serialize_fault(version: SoapVersion, code: &str, message: &str) -> String {
     let prefix = version.prefix();
     let ns = version.namespace();
+    let code = quick_xml::escape::escape(code);
+    let msg = quick_xml::escape::escape(message);
     match version {
         SoapVersion::V11 => format!(
             r#"<{prefix}:Fault xmlns:{prefix}="{ns}"><faultcode>{code}</faultcode><faultstring>{msg}</faultstring></{prefix}:Fault>"#,
             prefix = prefix,
             ns = ns,
             code = code,
-            msg = message
+            msg = msg
         ),
         SoapVersion::V12 => format!(
             r#"<{prefix}:Fault xmlns:{prefix}="{ns}"><Code><Value>{code}</Value></Code><Reason><Text xml:lang="en">{msg}</Text></Reason></{prefix}:Fault>"#,
             prefix = prefix,
             ns = ns,
             code = code,
-            msg = message
+            msg = msg
         ),
     }
 }
@@ -143,7 +149,11 @@ pub fn serialize_fault(version: SoapVersion, code: &str, message: &str) -> Strin
 /// Returns [`quick_xml::de::DeError`] if the fault XML cannot be deserialized.
 pub fn parse_soap_fault(xml: &str) -> Result<(String, String), quick_xml::de::DeError> {
     let version = detect_fault_version(xml);
-    let payload = extract_body(xml).unwrap_or_else(|_| xml.to_string());
+    // Only allocate a new String if `extract_body` actually changed the input.
+    // The fallback path borrows the original XML to avoid copying it.
+    let payload: Cow<'_, str> = extract_body(xml)
+        .map(Cow::Owned)
+        .unwrap_or_else(|_| Cow::Borrowed(xml));
 
     match version {
         SoapVersion::V11 => parse_fault_v11(&payload),
@@ -239,9 +249,14 @@ pub fn is_soap_fault(xml: &str) -> bool {
 ///   the action in a WS-Addressing `<soap:Header><Action>` element.
 /// - SOAP 1.2 uses the `env:` prefix, the 1.2 namespace, and puts the
 ///   action in the HTTP `Content-Type` header (caller's responsibility).
+///
+/// `action` is XML-escaped so that WSDL actions containing `<`, `>`, `&`, etc.
+/// do not produce malformed XML.  `body_xml` is inserted verbatim and is
+/// assumed to already be valid XML (as produced by `quick_xml::se::to_string_with_root`).
 pub fn build_envelope(version: SoapVersion, action: &str, body_xml: &str) -> String {
     let prefix = version.prefix();
     let ns = version.namespace();
+    let action = quick_xml::escape::escape(action);
     match version {
         SoapVersion::V11 => format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -400,5 +415,38 @@ mod tests {
     #[test]
     fn test_soap_version_default_is_v11() {
         assert_eq!(SoapVersion::default(), SoapVersion::V11);
+    }
+
+    #[test]
+    fn test_build_envelope_escapes_special_chars_in_action() {
+        // WSDL action URIs with query params or & are realistic.
+        let xml = build_envelope(
+            SoapVersion::V11,
+            "http://example.com/q?a=1&b=2",
+            "<req:Foo/>",
+        );
+        // `&` must be escaped to `&amp;` inside element text.
+        assert!(
+            xml.contains("&amp;b=2"),
+            "expected &amp; escape, got: {xml}"
+        );
+        // The unescaped `&b` must NOT appear.
+        assert!(!xml.contains("&b=2"), "unescaped & leaked: {xml}");
+    }
+
+    #[test]
+    fn test_serialize_fault_escapes_special_chars() {
+        let xml = serialize_fault(
+            SoapVersion::V11,
+            "Client",
+            "invalid <tag> & \"quote\" 'apos'",
+        );
+        assert!(
+            xml.contains("&lt;tag&gt;"),
+            "expected &lt;/&gt; escape: {xml}"
+        );
+        assert!(xml.contains("&amp;"), "expected &amp; escape: {xml}");
+        assert!(xml.contains("&quot;"), "expected &quot; escape: {xml}");
+        assert!(xml.contains("&apos;"), "expected &apos; escape: {xml}");
     }
 }

@@ -1,9 +1,11 @@
 //! Error types for Soap operations.
 
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// The primary error type for Soap operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SoapError {
     /// HTTP transport-level failure (connection, timeout, TLS, etc.).
     /// Wraps the underlying [`reqwest::Error`] for full source-chain visibility.
@@ -48,10 +50,33 @@ pub enum SoapError {
     NoEndpoint,
 
     /// Failed to load a client certificate for mTLS (two-way SSL) authentication.
-    /// Returned by [`crate::SoapClient::with_client_cert`] when the file cannot
-    /// be read, the password is wrong, or the bundle is not a valid PKCS#12.
-    #[error("failed to load client certificate: {0}")]
-    CertLoad(String),
+    /// Returned by [`crate::SoapClient::with_client_cert`] and
+    /// [`crate::SoapClient::with_identity`].
+    #[error("failed to load client certificate")]
+    CertLoad(#[source] CertError),
+}
+
+/// Detailed cause of a [`SoapError::CertLoad`].  Each variant preserves the
+/// original error so callers can `.source()` their way to the root cause.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum CertError {
+    /// Could not read the certificate file from disk.
+    #[error("read certificate file {path}")]
+    ReadCertFile {
+        /// Filesystem path that failed to read.
+        path: PathBuf,
+        /// Underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The file was read but could not be parsed as a PEM bundle.
+    #[error("parse PEM bundle")]
+    ParsePem(#[source] reqwest::Error),
+
+    /// The reqwest HTTP client could not be rebuilt with the new identity.
+    #[error("build HTTP client with identity")]
+    BuildClient(#[source] reqwest::Error),
 }
 
 impl SoapError {
