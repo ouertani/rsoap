@@ -1,0 +1,11 @@
+[package]
+name = "rsoap-examples"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rsoap = { path = "../rsoap" }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

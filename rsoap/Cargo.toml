@@ -1,0 +1,23 @@
+[package]
+name = "rsoap"
+version = "0.1.0"
+edition = "2021"
+description = "A SOAP client library for Rust with compile-time code generation from WDSL files"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+rsoap-macros = { path = "../rsoap-macros", version = "0.1.0" }
+reqwest = { workspace = true }
+serde = { workspace = true }
+quick-xml = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+default = ["blocking"]
+blocking = ["tokio/full"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+wiremock = "0.6"

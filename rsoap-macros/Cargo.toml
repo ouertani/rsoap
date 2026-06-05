@@ -1,0 +1,17 @@
+[package]
+name = "rsoap-macros"
+version = "0.1.0"
+edition = "2021"
+description = "Procedural macros for rsoap — SOAP client code generation from WSDL files"
+license = "MIT OR Apache-2.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
+serde = { workspace = true, features = ["derive"] }
+serde_xml = "0.7"
+thiserror = { workspace = true }

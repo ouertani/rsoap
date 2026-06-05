@@ -1,0 +1,28 @@
+[workspace]
+members = ["rsoap", "rsoap-macros", "examples"]
+resolver = "2"
+
+[workspace.lints.clippy]
+all = { level = "warn" }
+correctness = { level = "deny" }
+suspicious = { level = "warn" }
+style = { level = "warn" }
+complexity = { level = "warn" }
+perf = { level = "warn" }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "deny"
+
+[workspace.dependencies]
+rsoap = { path = "rsoap" }
+rsoap-macros = { path = "rsoap-macros" }
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+quick-xml = { version = "0.38", features = ["serialize"] }

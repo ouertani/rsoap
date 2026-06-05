@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:wsdlsoap="http://schemas.xmlsoap.org/wsdl/soap/"
+             xmlns:xs="http://www.w3.org/2001/XMLSchema"
+             targetNamespace="http://example.com/weather">
+
+  <!-- Types -->
+  <types>
+    <xs:schema targetNamespace="http://example.com/weather">
+      <xs:element name="GetTemperatureRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="zipcode" type="xs:string"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <xs:element name="GetTemperatureResponse">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="temperature" type="xs:decimal"/>
+            <xs:element name="unit" type="xs:string"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <xs:element name="GetForecastRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="location" type="xs:string"/>
+            <xs:element name="days" type="xs:int"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+
+      <xs:element name="GetForecastResponse">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="forecast" type="xs:string" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:schema>
+  </types>
+
+  <!-- Messages -->
+  <message name="GetTemperatureRequest">
+    <part name="parameters" element="ns:GetTemperatureRequest"/>
+  </message>
+
+  <message name="GetTemperatureResponse">
+    <part name="parameters" element="ns:GetTemperatureResponse"/>
+  </message>
+
+  <message name="GetForecastRequest">
+    <part name="parameters" element="ns:GetForecastRequest"/>
+  </message>
+
+  <message name="GetForecastResponse">
+    <part name="parameters" element="ns:GetForecastResponse"/>
+  </message>
+
+  <!-- Port Types -->
+  <portType name="WeatherPortType">
+    <operation name="GetTemperature">
+      <input message="ns:GetTemperatureRequest"/>
+      <output message="ns:GetTemperatureResponse"/>
+    </operation>
+    <operation name="GetForecast">
+      <input message="ns:GetForecastRequest"/>
+      <output message="ns:GetForecastResponse"/>
+    </operation>
+  </portType>
+
+  <!-- Binding -->
+  <binding name="WeatherBinding" type="ns:WeatherPortType">
+    <wsdlsoap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="GetTemperature">
+      <wsdlsoap:operation soapAction="http://example.com/weather/GetTemperature"/>
+      <input>
+        <wsdlsoap:body use="literal"/>
+      </input>
+      <output>
+        <wsdlsoap:body use="literal"/>
+      </output>
+    </operation>
+    <operation name="GetForecast">
+      <wsdlsoap:operation soapAction="http://example.com/weather/GetForecast"/>
+      <input>
+        <wsdlsoap:body use="literal"/>
+      </input>
+      <output>
+        <wsdlsoap:body use="literal"/>
+      </output>
+    </operation>
+  </binding>
+
+  <!-- Service -->
+  <service name="WeatherService">
+    <port name="WeatherPort" binding="ns:WeatherBinding">
+      <wsdlsoap:address location="http://localhost:8080/weather"/>
+    </port>
+  </service>
+
+</definitions>
