@@ -1,6 +1,6 @@
 [workspace]
 members = ["rsoap", "rsoap-macros", "examples"]
-resolver = "2"
+resolver = "3"
 
 [workspace.lints.clippy]
 all = { level = "warn" }

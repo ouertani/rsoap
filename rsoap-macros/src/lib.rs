@@ -45,8 +45,8 @@ fn parse_message(content: &str) -> Option<WsdlMessage> {
 
     let part = extract_tag_contents(content, "part").into_iter().next()?;
     let part_name = extract_attribute(&part.open, "name")?;
-    let element_ref = extract_attribute(&part.open, "element")
-        .or_else(|| extract_attribute(&part.open, "type"));
+    let element_ref =
+        extract_attribute(&part.open, "element").or_else(|| extract_attribute(&part.open, "type"));
 
     Some(WsdlMessage {
         name,
@@ -109,10 +109,9 @@ fn build_element_map(wsdl: &str) -> std::collections::HashMap<String, Vec<WsdlFi
             for elem in fetch_elems(&schema.body) {
                 if let Some(elem_name) = extract_attribute(&elem.open, "name") {
                     // Try namespace-prefixed variants of complexType
-                    let cplx_xml =
-                        ["complexType", "xs:complexType", "xsd:complexType"]
-                            .into_iter()
-                            .find_map(|t| extract_tag_content(&elem.body, t));
+                    let cplx_xml = ["complexType", "xs:complexType", "xsd:complexType"]
+                        .into_iter()
+                        .find_map(|t| extract_tag_content(&elem.body, t));
                     if let Some(cplx_xml) = cplx_xml {
                         let fields = parse_complex_type(cplx_xml.as_str());
                         map.insert(elem_name.clone(), fields);
@@ -229,24 +228,24 @@ fn parse_single_operation(
     // soap:action from the input block, or wsdlsoap:operation on the binding.
     let inputs = extract_tag_contents(&op.body, "input");
     let action = inputs
-         .first()
-         .and_then(|i| extract_attribute(&i.open, "soap:action"))
-         .or_else(|| {
-             // wsdlsoap:operation tag may carry soapAction
-             extract_tag_contents(&op.body, "operation")
-                  .first()
-                  .and_then(|o| extract_attribute(&o.open, "soapAction"))
-         })
-         .unwrap_or_else(|| format!("{namespace}/{name}"));
+        .first()
+        .and_then(|i| extract_attribute(&i.open, "soap:action"))
+        .or_else(|| {
+            // wsdlsoap:operation tag may carry soapAction
+            extract_tag_contents(&op.body, "operation")
+                .first()
+                .and_then(|o| extract_attribute(&o.open, "soapAction"))
+        })
+        .unwrap_or_else(|| format!("{namespace}/{name}"));
 
     // Endpoint from soap:address on binding or service; try namespace-prefixed variants.
     let address = extract_tag_contents(wsdl, "address")
-         .into_iter()
-         .chain(extract_tag_contents(wsdl, "wsdlsoap:address"))
-         .chain(extract_tag_contents(wsdl, " soap:address"))
-         .next()
-         .map(|s| extract_attribute(&s.open, "location").unwrap_or_default())
-         .unwrap_or_default();
+        .into_iter()
+        .chain(extract_tag_contents(wsdl, "wsdlsoap:address"))
+        .chain(extract_tag_contents(wsdl, " soap:address"))
+        .next()
+        .map(|s| extract_attribute(&s.open, "location").unwrap_or_default())
+        .unwrap_or_default();
 
     // Resolve request/response fields via XSD element map.
     let (request_fields, response_fields) = resolution::parse_input_output(&inputs, wsdl, elements);
@@ -312,7 +311,7 @@ mod resolution {
         // Try to find a matching element in the XSD map.
         let found = elements.iter().find(|(elem_name, _)| {
             *elem_name == msg_name
-                || elem_name.contains(&msg_name)
+                || elem_name.contains(msg_name)
                 || msg_name.contains(elem_name.split('R').next_back().unwrap_or(""))
         });
 
@@ -563,7 +562,7 @@ fn extract_tag_content(wsdl: &str, tag: &str) -> Option<String> {
 fn extract_tag_contents(wsdl: &str, tag: &str) -> Vec<TagMatch> {
     let open_pat = format!("<{}", tag);
     let close_tag = format!("</{}>", tag);
-    let mut result   = Vec::new();
+    let mut result = Vec::new();
     let mut search_start = 0usize;
 
     while let Some(rel) = wsdl[search_start..].find(&open_pat) {
@@ -575,10 +574,9 @@ fn extract_tag_contents(wsdl: &str, tag: &str) -> Vec<TagMatch> {
         // `find("/>")`) so that `/>` in child elements doesn't fool us.
         let gt_pos = match after_tag.find('>') {
             Some(p) => p,
-            None    => break,
+            None => break,
         };
-        let is_self_closing = gt_pos > 0
-            && after_tag.as_bytes()[gt_pos - 1] == b'/';
+        let is_self_closing = gt_pos > 0 && after_tag.as_bytes()[gt_pos - 1] == b'/';
         let body_end_abs = tag_start + open_pat.len() + gt_pos + 1;
 
         let open_text = wsdl[tag_start..body_end_abs].trim().to_string();
