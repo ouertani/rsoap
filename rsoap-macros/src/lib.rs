@@ -448,16 +448,12 @@ pub fn soap_operation(input: TokenStream) -> TokenStream {
     let struct_name = &input.ident;
 
     #[allow(clippy::cmp_owned)]
-    let soap_attr = match input
-        .attrs
-        .iter()
-        .find(|a| {
-            a.path()
-                .get_ident()
-                .map(|p| p.to_string() == "soap")
-                .unwrap_or(false)
-        })
-    {
+    let soap_attr = match input.attrs.iter().find(|a| {
+        a.path()
+            .get_ident()
+            .map(|p| p.to_string() == "soap")
+            .unwrap_or(false)
+    }) {
         Some(attr) => attr,
         None => {
             return TokenStream::from(compile_error(
@@ -495,8 +491,11 @@ pub fn soap_operation(input: TokenStream) -> TokenStream {
     {
         Some(op) => TokenStream::from(generate_from_wsdl(op, struct_name)),
         None => {
-            let available: Vec<&str> =
-                parsed.operations.iter().map(|op| op.name.as_str()).collect();
+            let available: Vec<&str> = parsed
+                .operations
+                .iter()
+                .map(|op| op.name.as_str())
+                .collect();
             TokenStream::from(compile_error(&format!(
                 "operation '{operation_name}' not found in WSDL (available: {})",
                 available.join(", ")
