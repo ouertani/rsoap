@@ -52,7 +52,7 @@ pub trait SoapOperation {
         Self::Response: DeserializeOwned,
     {
         // Check for soap fault before deserializing
-        if is_soap_fault(response_xml) {
+        if envelope::is_soap_fault(response_xml) {
             let (code, message) = envelope::parse_soap_fault(response_xml)
                 .map_err(|e| SoapError::DeserializeResponse(Box::new(e)))?;
             return Err(SoapError::SoapFault { code, message });
@@ -61,11 +61,6 @@ pub trait SoapOperation {
         envelope::deserialize_response::<Self::Response>(response_xml)
             .map_err(|e| SoapError::DeserializeResponse(Box::new(e)))
     }
-}
-
-/// Check if XML appears to be a soap fault response.
-fn is_soap_fault(xml: &str) -> bool {
-    xml.contains("<soap:Fault") || xml.contains("<Fault xmlns=")
 }
 
 /// A configured SOAP client ready to make requests.
@@ -81,14 +76,14 @@ impl SoapClient {
     /// Create a new soap client pointing at the given endpoint URL.
     ///
     /// # Errors
-    /// Returns [`SoapError::Http`] if the URL cannot be parsed.
+    /// Returns [`SoapError::HttpStatus`] if the URL is not a valid HTTP/HTTPS URL.
     pub fn new(endpoint: impl Into<String>) -> Result<Self, SoapError> {
         let endpoint = endpoint.into();
 
-        // Validate that the URL is parseable by reqwest's internal parser.
-        if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
-            return Err(SoapError::http_status(reqwest::StatusCode::BAD_REQUEST));
-        }
+        // Parse to validate the URL — handles edge cases like uppercase schemes,
+        // ports, query strings, and fragments that a `starts_with` check would reject.
+        reqwest::Url::parse(&endpoint)
+            .map_err(|_| SoapError::http_status(reqwest::StatusCode::BAD_REQUEST))?;
 
         Ok(Self {
             http: HttpClient::new(),
@@ -128,7 +123,7 @@ impl SoapClient {
         let (action, body_xml) = operation
             .build_request_body(request)
             .map_err(SoapError::serialize_request)?;
-        let xml_body = build_envelope(&action, &body_xml);
+        let xml_body = envelope::build_envelope(&action, &body_xml);
 
         let mut request_builder = self
             .http
@@ -177,22 +172,6 @@ impl std::fmt::Debug for SoapClient {
     }
 }
 
-/// Build the SOAP envelope XML string from action and body content.
-fn build_envelope(action: &str, body_xml: &str) -> String {
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-    <soap:Header>
-       <Action soap:mustUnderstand="true" xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">{action}</Action>
-    </soap:Header>
-    <soap:Body>
-       {body}
-    </soap:Body>
-</soap:Envelope>"#,
-        body = body_xml,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,7 +189,7 @@ mod tests {
 
     #[test]
     fn builds_envelope_for_operation() {
-        let xml = build_envelope(
+        let xml = envelope::build_envelope(
             "GetTemperature",
             "<req:GetTemperature><lat>40</lat></req:GetTemperature>",
         );
@@ -232,9 +211,9 @@ mod tests {
 
     #[test]
     fn is_soap_fault_detects_fault() {
-        assert!(is_soap_fault("<soap:Fault>code</soap:Fault>"));
-        assert!(is_soap_fault("<Fault xmlns=\"...\">msg</Fault>"));
-        assert!(!is_soap_fault(
+        assert!(envelope::is_soap_fault("<soap:Fault>code</soap:Fault>"));
+        assert!(envelope::is_soap_fault("<Fault xmlns=\"...\">msg</Fault>"));
+        assert!(!envelope::is_soap_fault(
             "<GetTempResponse><temp>72</temp></GetTempResponse>"
         ));
     }

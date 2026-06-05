@@ -86,17 +86,39 @@ fn xsd_to_rust(typ: &str) -> &'static str {
 
 // ─────────── Namespace-prefix detection ───────────
 
+/// Find the namespace prefix bound to `uri` in the WSDL's `xmlns:<prefix>="<uri>"`
+/// declarations.  Searches the full document so it works even when declarations
+/// span multiple lines.
 fn detect_ns_prefix(wsdl: &str, uri: &str) -> Option<String> {
-    wsdl.lines().find_map(|line| {
-        let t = line.trim();
-        if t.contains("xmlns:") && t.contains(uri) {
-            let pos = t.find("xmlns:")?;
-            let after = &t[pos + 6..];
-            Some(after.split('=').next()?.trim().to_string())
-        } else {
-            None
+    let mut search_start = 0;
+    while let Some(rel) = wsdl[search_start..].find("xmlns:") {
+        let decl_start = search_start + rel;
+        // Skip past "xmlns:" to read the prefix name.
+        let after_decl = decl_start + "xmlns:".len();
+        let prefix_end = wsdl[after_decl..]
+            .find(|c: char| c == '=' || c.is_whitespace())
+            .map(|p| after_decl + p)?;
+        let prefix = &wsdl[after_decl..prefix_end];
+
+        // Look for "=" followed by a quoted URI on the same or next line.
+        if let Some(eq_rel) = wsdl[prefix_end..].find('=') {
+            let after_eq = prefix_end + eq_rel + 1;
+            // Skip whitespace and newlines until the opening quote.
+            let quote_pos = wsdl[after_eq..].find(['"', '\''])?;
+            let quote_char = wsdl.as_bytes()[after_eq + quote_pos];
+            let uri_start = after_eq + quote_pos + 1;
+            if let Some(close_rel) = wsdl[uri_start..].find(quote_char as char) {
+                let declared_uri = &wsdl[uri_start..uri_start + close_rel];
+                if declared_uri == uri {
+                    return Some(prefix.to_string());
+                }
+                search_start = uri_start + close_rel;
+                continue;
+            }
         }
-    })
+        search_start = after_decl;
+    }
+    None
 }
 
 // ─────────── XSD element map builder ───────────
@@ -447,16 +469,14 @@ pub fn soap_operation(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let struct_name = &input.ident;
 
-    #[allow(clippy::cmp_owned)]
-    let soap_attr = match input.attrs.iter().find(|a| {
-        a.path()
-            .get_ident()
-            .map(|p| p.to_string() == "soap")
-            .unwrap_or(false)
-    }) {
+    let soap_attr = match input
+        .attrs
+        .iter()
+        .find(|a| a.path().get_ident().is_some_and(|p| p == "soap"))
+    {
         Some(attr) => attr,
         None => {
-            return TokenStream::from(compile_error(
+            return TokenStream::from(emit_compile_error(
                 "`#[soap(wsdl = \"...\", operation_name = \"...\")]` attribute is required",
             ));
         }
@@ -470,7 +490,7 @@ pub fn soap_operation(input: TokenStream) -> TokenStream {
         Some(path) => match std::fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) => {
-                return TokenStream::from(compile_error(&format!(
+                return TokenStream::from(emit_compile_error(&format!(
                     "Failed to read WSDL file '{path}': {e}"
                 )));
             }
@@ -496,7 +516,7 @@ pub fn soap_operation(input: TokenStream) -> TokenStream {
                 .iter()
                 .map(|op| op.name.as_str())
                 .collect();
-            TokenStream::from(compile_error(&format!(
+            TokenStream::from(emit_compile_error(&format!(
                 "operation '{operation_name}' not found in WSDL (available: {})",
                 available.join(", ")
             )))
@@ -506,7 +526,7 @@ pub fn soap_operation(input: TokenStream) -> TokenStream {
 
 /// Emit a `compile_error!` token so the user sees a proper compile-time diagnostic
 /// with a span, rather than a runtime panic from the proc-macro.
-fn compile_error(msg: &str) -> TokenStream2 {
+fn emit_compile_error(msg: &str) -> TokenStream2 {
     quote! { compile_error!(#msg); }
 }
 
@@ -559,6 +579,7 @@ fn parse_lit_from_expr(expr: &syn::Expr) -> Option<String> {
 /// self-closing, or the full opening line up to the first `>` for
 /// non-self-closing) so attributes can be extracted.  `body` holds the
 /// inner text (empty for self-closing tags).
+#[derive(Debug)]
 struct TagMatch {
     open: String,
     body: String,
@@ -638,16 +659,27 @@ fn extract_attribute(tag_content: &str, attr_name: &str) -> Option<String> {
     }
 }
 
+/// Convert camelCase / PascalCase / mixed-acronym identifiers to snake_case.
+///
+/// Inserts an underscore at word boundaries:
+/// - Between a lowercase char and an uppercase char (`camelCase` → `camel_case`)
+/// - Between an acronym run and the following word (`XMLParser` → `xml_parser`)
 fn camel_to_snake(s: &str) -> String {
-    s.chars()
-        .enumerate()
-        .fold(String::new(), |mut acc, (i, c)| {
-            if i > 0 && c.is_uppercase() {
-                acc.push('_');
+    let chars: Vec<char> = s.chars().collect();
+    let mut result = String::with_capacity(s.len() + 4);
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            let prev = chars[i - 1];
+            let next = chars.get(i + 1).copied();
+            let is_camel_boundary = prev.is_lowercase();
+            let is_acronym_end = prev.is_uppercase() && next.is_some_and(char::is_lowercase);
+            if is_camel_boundary || is_acronym_end {
+                result.push('_');
             }
-            acc.extend(c.to_lowercase());
-            acc
-        })
+        }
+        result.extend(c.to_lowercase());
+    }
+    result
 }
 
 // ─────────── Unit tests ───────────
@@ -663,6 +695,17 @@ mod tests {
         assert_eq!(xsd_to_rust("xs:decimal"), "f64");
         assert_eq!(xsd_to_rust("xs:boolean"), "bool");
         assert_eq!(xsd_to_rust("unknown"), "String"); // fallback
+    }
+
+    #[test]
+    fn camel_to_snake_handles_boundaries() {
+        assert_eq!(camel_to_snake("GetTemperature"), "get_temperature");
+        assert_eq!(camel_to_snake("camelCase"), "camel_case");
+        assert_eq!(camel_to_snake("PascalCase"), "pascal_case");
+        assert_eq!(camel_to_snake("XMLParser"), "xml_parser");
+        assert_eq!(camel_to_snake("simple"), "simple");
+        assert_eq!(camel_to_snake("URL"), "url");
+        assert_eq!(camel_to_snake("already_snake"), "already_snake");
     }
 
     #[test]
