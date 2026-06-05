@@ -6,7 +6,15 @@ use serde::{de::DeserializeOwned, Serialize};
 /// The SOAP 1.1 Envelope namespace URI.
 pub const SOAP_NS_ENVELOPE: &str = "http://schemas.xmlsoap.org/soap/envelope/";
 
+const SOAP_BODY_OPEN: &str = "<soap:Body>";
+const SOAP_BODY_CLOSE: &str = "</soap:Body>";
+const BODY_OPEN: &str = "<Body>";
+const BODY_CLOSE: &str = "</Body>";
+
 /// Helper to serialize a request type to XML body string with a specific root element name.
+///
+/// # Errors
+/// Returns [`quick_xml::se::SeError`] if the payload cannot be serialized.
 pub fn serialize_request<T: Serialize>(
     body_name: &str,
     payload: &T,
@@ -15,25 +23,17 @@ pub fn serialize_request<T: Serialize>(
 }
 
 /// Extract the inner XML content from inside `<soap:Body>` tags.
+///
+/// Tries `<soap:Body>` first, then falls back to the unprefixed `<Body>`.
+///
+/// # Errors
+/// Returns [`quick_xml::de::DeError`] if neither `<soap:Body>` nor `<Body>` tags are found.
 pub fn extract_body(xml: &str) -> Result<String, quick_xml::de::DeError> {
-    // Try standard SOAP namespace first
-    if let Some(start) = xml.find("<soap:Body>") {
-        if start + 11 < xml.len() {
-            let body_start = start + 11; // length of "<soap:Body>"
-            if let Some(end) = xml[body_start..].find("</soap:Body>") {
-                return Ok(xml[body_start..body_start + end].trim().to_string());
-            }
-        }
+    if let Some(body) = extract_tagged_body(xml, SOAP_BODY_OPEN, SOAP_BODY_CLOSE) {
+        return Ok(body);
     }
-
-    // Fallback: try raw `<Body>` without namespace prefix
-    if let Some(start) = xml.find("<Body>") {
-        if start + 6 < xml.len() {
-            let body_start = start + 6; // length of "<Body>"
-            if let Some(end) = xml[body_start..].find("</Body>") {
-                return Ok(xml[body_start..body_start + end].trim().to_string());
-            }
-        }
+    if let Some(body) = extract_tagged_body(xml, BODY_OPEN, BODY_CLOSE) {
+        return Ok(body);
     }
 
     Err(quick_xml::de::DeError::Custom(
@@ -41,8 +41,24 @@ pub fn extract_body(xml: &str) -> Result<String, quick_xml::de::DeError> {
     ))
 }
 
+/// Extract content between `open_tag` and `close_tag` in `xml`, if both are present
+/// and `open_tag` occurs before `close_tag`.
+fn extract_tagged_body(xml: &str, open_tag: &str, close_tag: &str) -> Option<String> {
+    let start = xml.find(open_tag)?;
+    let body_start = start + open_tag.len();
+    if body_start >= xml.len() {
+        return None;
+    }
+    let end = xml[body_start..].find(close_tag)?;
+    Some(xml[body_start..body_start + end].trim().to_string())
+}
+
 /// Deserialize a SOAP response string into a typed struct.
 /// Automatically extracts the content from inside `<soap:Body>` before deserializing.
+///
+/// # Errors
+/// Returns [`quick_xml::de::DeError`] if the body cannot be extracted or the
+/// body content cannot be deserialized into `T`.
 pub fn deserialize_response<T: DeserializeOwned>(xml: &str) -> Result<T, quick_xml::de::DeError> {
     let body_content = extract_body(xml)?;
     from_str(&body_content)
@@ -61,6 +77,9 @@ pub fn serialize_fault(code: &str, message: &str) -> String {
 /// Deserialize a SOAP fault from XML content.
 /// Accepts either raw `<soap:Fault>` XML or a full `<soap:Envelope>` wrapping it.
 /// Returns `Ok((code, message))` if valid, or an error if parsing fails.
+///
+/// # Errors
+/// Returns [`quick_xml::de::DeError`] if the fault XML cannot be deserialized.
 pub fn parse_soap_fault(xml: &str) -> Result<(String, String), quick_xml::de::DeError> {
     let payload = extract_body(xml).unwrap_or_else(|_| xml.to_string());
 

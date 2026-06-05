@@ -279,8 +279,8 @@ async fn e2e_http_error() {
 
     assert!(result.is_err(), "expected HTTP error");
     match result.unwrap_err() {
-        rsoap::SoapError::Http(ref s) => assert!(s.contains("500")),
-        other => panic!("expected SoapError::Http, got {:?}", other),
+        rsoap::SoapError::HttpStatus { code, .. } => assert_eq!(code, 500),
+        other => panic!("expected SoapError::HttpStatus, got {:?}", other),
     }
 }
 

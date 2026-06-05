@@ -12,7 +12,7 @@ use syn::{parse::ParseStream, parse_macro_input, DeriveInput, MetaNameValue, Tok
 // ─────────── Data structures ───────────
 
 /// A single struct field derived from WSDL / XSD.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct WsdlField {
     rust_name: String, // snake_case identifier
     xml_name: String,  /* original camelCase or XSD name for #[serde(rename)] */
@@ -20,6 +20,7 @@ struct WsdlField {
 }
 
 /// Parsed SOAP operation from WSDL.
+#[derive(Debug)]
 #[allow(dead_code)]
 struct WsdlOperation {
     name: String,
@@ -32,6 +33,7 @@ struct WsdlOperation {
 }
 
 /// Represents a WSDL message definition.
+#[derive(Debug)]
 #[allow(dead_code)]
 struct WsdlMessage {
     name: String,
@@ -56,6 +58,7 @@ fn parse_message(content: &str) -> Option<WsdlMessage> {
 }
 
 /// A parsed WSDL document with operations and an XSD element map.
+#[derive(Debug)]
 #[allow(dead_code)]
 struct ParsedWsdl {
     target_namespace: String,
@@ -445,7 +448,7 @@ pub fn soap_operation(input: TokenStream) -> TokenStream {
     let struct_name = &input.ident;
 
     #[allow(clippy::cmp_owned)]
-    let soap_attr = input
+    let soap_attr = match input
         .attrs
         .iter()
         .find(|a| {
@@ -454,43 +457,58 @@ pub fn soap_operation(input: TokenStream) -> TokenStream {
                 .map(|p| p.to_string() == "soap")
                 .unwrap_or(false)
         })
-        .expect("`#[soap(wsdl = \"...\", operation_name = \"...\")]` attribute is required");
+    {
+        Some(attr) => attr,
+        None => {
+            return TokenStream::from(compile_error(
+                "`#[soap(wsdl = \"...\", operation_name = \"...\")]` attribute is required",
+            ));
+        }
+    };
 
     let attrs = extract_soap_meta(soap_attr);
     let wsdl_path = attrs.get("wsdl").cloned();
     let operation_name = attrs.get("operation_name").cloned().unwrap_or_default();
 
     let wsdl_str = match &wsdl_path {
-        Some(path) => std::fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("Failed to read WSDL file '{path}': {e}")),
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                return TokenStream::from(compile_error(&format!(
+                    "Failed to read WSDL file '{path}': {e}"
+                )));
+            }
+        },
         None => String::new(),
     };
 
-    let generated = if wsdl_str.is_empty() {
-        generate_placeholder(struct_name, &operation_name)
-    } else {
-        let parsed = ParsedWsdl::parse(&wsdl_str);
+    if wsdl_str.is_empty() {
+        return TokenStream::from(generate_placeholder(struct_name, &operation_name));
+    }
 
-        match parsed
-            .operations
-            .iter()
-            .find(|op| op.name == operation_name)
-        {
-            Some(op) => generate_from_wsdl(op, struct_name),
-            None => panic!(
-                "operation '{}' not found in WSDL (available: {})",
-                operation_name,
-                parsed
-                    .operations
-                    .iter()
-                    .map(|op| op.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+    let parsed = ParsedWsdl::parse(&wsdl_str);
+
+    match parsed
+        .operations
+        .iter()
+        .find(|op| op.name == operation_name)
+    {
+        Some(op) => TokenStream::from(generate_from_wsdl(op, struct_name)),
+        None => {
+            let available: Vec<&str> =
+                parsed.operations.iter().map(|op| op.name.as_str()).collect();
+            TokenStream::from(compile_error(&format!(
+                "operation '{operation_name}' not found in WSDL (available: {})",
+                available.join(", ")
+            )))
         }
-    };
+    }
+}
 
-    TokenStream::from(quote! { #generated })
+/// Emit a `compile_error!` token so the user sees a proper compile-time diagnostic
+/// with a span, rather than a runtime panic from the proc-macro.
+fn compile_error(msg: &str) -> TokenStream2 {
+    quote! { compile_error!(#msg); }
 }
 
 // ─────────── Helper functions ───────────
