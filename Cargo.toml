@@ -39,7 +39,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
-quick-xml = { version = "0.38", features = ["serialize"] }
+quick-xml = { version = "0.40", features = ["serialize"] }
 
 [profile.dev]
 opt-level = 0

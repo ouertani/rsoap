@@ -106,6 +106,29 @@ pub fn parse_soap_fault(xml: &str) -> Result<(String, String), quick_xml::de::De
     ))
 }
 
+/// Quick check for whether an XML payload appears to be a SOAP fault.
+/// Returns `true` if the payload contains `<soap:Fault` or `<Fault xmlns=`.
+pub fn is_soap_fault(xml: &str) -> bool {
+    xml.contains("<soap:Fault") || xml.contains("<Fault xmlns=")
+}
+
+/// Build the SOAP 1.1 envelope XML string wrapping `action` (in the
+/// WS-Addressing `Action` header) and `body_xml` (the operation payload).
+pub fn build_envelope(action: &str, body_xml: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+    <soap:Header>
+       <Action soap:mustUnderstand="true" xmlns="http://schemas.xmlsoap.org/ws/2004/08/addressing">{action}</Action>
+    </soap:Header>
+    <soap:Body>
+       {body}
+    </soap:Body>
+</soap:Envelope>"#,
+        body = body_xml,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
