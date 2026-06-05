@@ -17,22 +17,22 @@ use std::collections::HashMap;
 /// - Deserialze SOAP response XML into typed response structs
 /// - Know the operation's action, endpoint, and body element name
 pub trait SoapOperation {
-     /// The request input type for this operation.
+    /// The request input type for this operation.
     type Request;
 
-     /// The response output type for this operation.
+    /// The response output type for this operation.
     type Response;
 
-     /// The WSDL action URI for this operation.
+    /// The WSDL action URI for this operation.
     const ACTION: &'static str;
 
-     /// Default endpoint URL from the WSDL.
+    /// Default endpoint URL from the WSDL.
     const ENDPOINT: &'static str;
 
-     /// The XML element name to use as the root of the body content.
+    /// The XML element name to use as the root of the body content.
     const BODY_ELEMENT: &'static str;
 
-     /// Serialize a request struct into (soap_action, body_xml).
+    /// Serialize a request struct into (soap_action, body_xml).
     fn build_request_body(
         &self,
         request: &Self::Request,
@@ -45,16 +45,13 @@ pub trait SoapOperation {
         Ok((action, xml))
     }
 
-     /// Deserialize a SOAP response string into the typed response.
-     /// Checks for SOAP faults before attempting deserialization.
-    fn parse_response(
-        &self,
-        response_xml: &str,
-    ) -> Result<Self::Response, SoapError>
+    /// Deserialize a SOAP response string into the typed response.
+    /// Checks for SOAP faults before attempting deserialization.
+    fn parse_response(&self, response_xml: &str) -> Result<Self::Response, SoapError>
     where
         Self::Response: DeserializeOwned,
     {
-         // Check for soap fault before deserializing
+        // Check for soap fault before deserializing
         if is_soap_fault(response_xml) {
             let (code, message) = parse_soap_error(response_xml)?;
             return Err(SoapError::SoapFault { code, message });
@@ -71,18 +68,16 @@ fn is_soap_fault(xml: &str) -> bool {
 }
 
 /// Try to parse soap fault info from an XML string.
-fn parse_soap_error(
-    xml: &str,
-) -> Result<(String, String), SoapError> {
-     #[derive(Debug, serde::Deserialize)]
+fn parse_soap_error(xml: &str) -> Result<(String, String), SoapError> {
+    #[derive(Debug, serde::Deserialize)]
     struct Fault {
         faultcode: Option<String>,
         faultstring: Option<FaultString>,
     }
 
-     #[derive(Debug, serde::Deserialize)]
+    #[derive(Debug, serde::Deserialize)]
     struct FaultString {
-         #[serde(rename = "$text")]
+        #[serde(rename = "$text")]
         value: String,
     }
 
@@ -108,14 +103,14 @@ pub struct SoapClient {
 }
 
 impl SoapClient {
-     /// Create a new soap client pointing at the given endpoint URL.
-     ///
-     /// # Errors
-     /// Returns [`SoapError::Http`] if the URL cannot be parsed.
+    /// Create a new soap client pointing at the given endpoint URL.
+    ///
+    /// # Errors
+    /// Returns [`SoapError::Http`] if the URL cannot be parsed.
     pub fn new(endpoint: impl Into<String>) -> Result<Self, SoapError> {
         let endpoint = endpoint.into();
 
-         // Validate that the URL is parseable by reqwest's internal parser.
+        // Validate that the URL is parseable by reqwest's internal parser.
         if !endpoint.starts_with("http://") && !endpoint.starts_with("https://") {
             return Err(SoapError::http(reqwest::StatusCode::BAD_REQUEST));
         }
@@ -127,28 +122,24 @@ impl SoapClient {
         })
     }
 
-     /// Add a default header that will be included in every request.
-    pub fn with_header(
-        mut self,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Self {
+    /// Add a default header that will be included in every request.
+    pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.default_headers.insert(key.into(), value.into());
         self
     }
 
-     /// Set custom headers from a map.
+    /// Set custom headers from a map.
     pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
         self.default_headers.extend(headers);
         self
     }
 
-     /// Send a soap request using a typed operation and return the deserialized response.
-     ///
-     /// Automatically detects soap faults and converts them to [`SoapError::SoapFault`].
-     ///
-     /// # Errors
-     /// Returns various [`SoapError`] variants on network, parsing, or soap fault failures.
+    /// Send a soap request using a typed operation and return the deserialized response.
+    ///
+    /// Automatically detects soap faults and converts them to [`SoapError::SoapFault`].
+    ///
+    /// # Errors
+    /// Returns various [`SoapError`] variants on network, parsing, or soap fault failures.
     pub async fn call<O>(
         &self,
         operation: &O,
@@ -160,8 +151,8 @@ impl SoapClient {
         O::Response: DeserializeOwned,
     {
         let (action, body_xml) = operation
-             .build_request_body(request)
-             .map_err(SoapError::serialize_request)?;
+            .build_request_body(request)
+            .map_err(SoapError::serialize_request)?;
         let xml_body = build_envelope(&action, &body_xml);
 
         let mut request_builder = self
@@ -169,25 +160,25 @@ impl SoapClient {
             .post(&self.endpoint)
             .header("Content-Type", "text/xml; charset=utf-8");
 
-         // Apply default headers.
+        // Apply default headers.
         for (key, value) in &self.default_headers {
             request_builder = request_builder.header(key.as_str(), value.as_str());
         }
 
         let response = request_builder.body(xml_body).send().await?;
 
-         if !response.status().is_success() {
-             let status = response.status();
-             return Err(SoapError::http(status));
-          }
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(SoapError::http(status));
+        }
 
         let text = response.text().await?;
         operation.parse_response(&text)
     }
 
-     /// Return the endpoint URL this client is configured against.
+    /// Return the endpoint URL this client is configured against.
     pub fn endpoint(&self) -> &str {
-         &self.endpoint
+        &self.endpoint
     }
 }
 
@@ -231,18 +222,18 @@ fn build_envelope(action: &str, body_xml: &str) -> String {
 mod tests {
     use super::*;
 
-     #[test]
+    #[test]
     fn creates_client_with_valid_url() {
         let client = SoapClient::new("https://example.com/soap").unwrap();
         assert_eq!(client.endpoint(), "https://example.com/soap");
     }
 
-     #[test]
+    #[test]
     fn rejects_invalid_url() {
         SoapClient::new("not-a-url").unwrap_err();
     }
 
-     #[test]
+    #[test]
     fn builds_envelope_for_operation() {
         let xml = build_envelope(
             "GetTemperature",
@@ -255,7 +246,7 @@ mod tests {
         assert!(xml.contains("<req:GetTemperature>"));
     }
 
-     #[test]
+    #[test]
     fn client_is_debuggable() {
         let client = SoapClient::new("https://example.com")
             .unwrap()
@@ -264,20 +255,18 @@ mod tests {
         assert!(debug_str.contains("SoapClient"));
     }
 
-     #[test]
+    #[test]
     fn is_soap_fault_detects_fault() {
         assert!(is_soap_fault("<soap:Fault>code</soap:Fault>"));
         assert!(is_soap_fault("<Fault xmlns=\"...\">msg</Fault>"));
-        assert!(
-            !is_soap_fault(
-                "<GetTempResponse><temp>72</temp></GetTempResponse>"
-            )
-        );
+        assert!(!is_soap_fault(
+            "<GetTempResponse><temp>72</temp></GetTempResponse>"
+        ));
     }
 
-        #[test]
+    #[test]
     fn parse_soap_error() {
-         let xml = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+        let xml = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
             <soap:Body>
                 <soap:Fault xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
                     <faultcode>Server</faultcode>
@@ -286,12 +275,12 @@ mod tests {
             </soap:Body>
         </soap:Envelope>"#;
 
-         let (code, message) = super::parse_soap_error(xml).unwrap();
-         assert_eq!(code, "Server");
-         assert_eq!(message, "Invalid credentials");
-       }
+        let (code, message) = super::parse_soap_error(xml).unwrap();
+        assert_eq!(code, "Server");
+        assert_eq!(message, "Invalid credentials");
+    }
 
-     #[test]
+    #[test]
     fn extract_body_from_soap_envelope() {
         let xml = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
       <soap:Body>

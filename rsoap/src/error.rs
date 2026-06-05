@@ -17,21 +17,21 @@ pub enum SoapError {
     #[error("failed to deserialize response: {0}")]
     DeserializeResponse(#[source] Box<quick_xml::de::DeError>),
 
-     /// The SOAP envelope contained a fault from the server.
-     #[error("Soap fault: [{code}] {message}")]
-    SoapFault { 
+    /// The SOAP envelope contained a fault from the server.
+    #[error("Soap fault: [{code}] {message}")]
+    SoapFault {
         /// The WSDL-defined fault code (e.g., "Client", "Server").
-        code: String, 
+        code: String,
         /// Human-readable description of the fault.
-        message: String, 
-      },
+        message: String,
+    },
 
-     /// The requested operation could not be found in the WSDL.
-     #[error("operation '{name}' not found in WSDL definition")]
-    OperationNotFound { 
+    /// The requested operation could not be found in the WSDL.
+    #[error("operation '{name}' not found in WSDL definition")]
+    OperationNotFound {
         /// The name of the operation that was not found.
-        name: String, 
-      },
+        name: String,
+    },
 
     /// Missing or invalid endpoint URL.
     #[error("no endpoint URL configured for Soap client")]

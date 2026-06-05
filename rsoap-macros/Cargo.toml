@@ -13,5 +13,3 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "extra-traits"] }
 serde = { workspace = true, features = ["derive"] }
-serde_xml = "0.7"
-thiserror = { workspace = true }
