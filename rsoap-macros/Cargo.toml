@@ -1,9 +1,17 @@
 [package]
 name = "rsoap-macros"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
 description = "Procedural macros for rsoap — SOAP client code generation from WSDL files"
-license = "MIT OR Apache-2.0"
+homepage.workspace = true
+repository.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [lib]
 proc-macro = true
