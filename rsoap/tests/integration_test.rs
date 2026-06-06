@@ -508,3 +508,96 @@ async fn e2e_soap12_fault_detected() {
         other => panic!("expected SoapFault, got {:?}", other),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Optional & nillable element support (minOccurs="0" / nillable="true")
+// ---------------------------------------------------------------------------
+
+/// End-to-end check that the derive macro maps `minOccurs="0"` and
+/// `nillable="true"` XSD attributes to `Option<T>` Rust fields, and that
+/// the generated struct round-trips through serde with the expected
+/// skip-on-none semantics.
+mod optional_nillable {
+    use rsoap::SoapOperationMacro;
+
+    #[derive(SoapOperationMacro)]
+    #[soap(wsdl = "rsoap/tests/wsdl/customer.wsdl", operation_name = "GetCustomer")]
+    #[allow(dead_code)]
+    pub struct GetCustomer;
+
+    #[test]
+    fn generated_request_has_optional_and_required_fields() {
+        // Required field must be set; optional fields default to None / empty.
+        let req = getcustomer::GetCustomerRequest {
+            id: 42,
+            middle_name: None,
+            death_date: None,
+            tag: Vec::new(),
+        };
+        // The values themselves prove the field types at compile time:
+        // - `id: i32` (required)            -> not Option
+        // - `middle_name: Option<String>`   -> minOccurs="0"
+        // - `death_date: Option<String>`    -> nillable="true"
+        // - `tag: Vec<String>`              -> unbounded stays Vec, never Option
+        assert_eq!(req.id, 42);
+        assert!(req.middle_name.is_none());
+        assert!(req.death_date.is_none());
+        assert!(req.tag.is_empty());
+    }
+
+    #[test]
+    fn optional_none_fields_are_skipped_during_serialization() {
+        let req = getcustomer::GetCustomerRequest {
+            id: 7,
+            middle_name: None,
+            death_date: None,
+            tag: vec!["a".into()],
+        };
+        let xml = quick_xml::se::to_string_with_root("Req", &req).unwrap();
+        assert!(xml.contains("<id>7</id>"));
+        assert!(xml.contains("<tag>a</tag>"));
+        // None-valued optional fields must NOT appear in the wire format.
+        assert!(
+            !xml.contains("middleName"),
+            "middleName should be skipped when None, got: {xml}"
+        );
+        assert!(
+            !xml.contains("deathDate"),
+            "deathDate should be skipped when None, got: {xml}"
+        );
+    }
+
+    #[test]
+    fn optional_some_fields_are_serialized_with_xsd_element_name() {
+        let req = getcustomer::GetCustomerRequest {
+            id: 7,
+            middle_name: Some("Quentin".into()),
+            death_date: Some("2010-05-12".into()),
+            tag: Vec::new(),
+        };
+        let xml = quick_xml::se::to_string_with_root("Req", &req).unwrap();
+        assert!(xml.contains("<middleName>Quentin</middleName>"), "xml: {xml}");
+        assert!(
+            xml.contains("<deathDate>2010-05-12</deathDate>"),
+            "xml: {xml}"
+        );
+    }
+
+    #[test]
+    fn response_with_missing_optional_field_deserializes_to_none() {
+        // The `note` element is `minOccurs="0"` — a server may omit it.
+        // Without `Option<T>` + `#[serde(default)]` this would fail to parse.
+        let xml = "<GetCustomerResponse><status>OK</status></GetCustomerResponse>";
+        let resp: getcustomer::GetCustomerResponse = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(resp.status, "OK");
+        assert!(resp.note.is_none());
+    }
+
+    #[test]
+    fn response_with_present_optional_field_deserializes_to_some() {
+        let xml = "<GetCustomerResponse><status>OK</status><note>hello</note></GetCustomerResponse>";
+        let resp: getcustomer::GetCustomerResponse = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(resp.status, "OK");
+        assert_eq!(resp.note.as_deref(), Some("hello"));
+    }
+}

@@ -76,6 +76,7 @@ The certificate is presented on every request, satisfying the transport-binding 
 - **Compile-time WSDL parsing** — no runtime XML schema download, no manual struct definitions.
 - **Typed request/response** — generated structs with `serde` rename attributes match the XSD element names.
 - **`maxOccurs="unbounded"`** — automatically wrapped in `Vec<T>`.
+- **Optional & nillable elements** — XSD elements with `minOccurs="0"` or `nillable="true"` are mapped to `Option<T>` with `#[serde(default, skip_serializing_if = "Option::is_none")]`, so absent fields deserialize cleanly and `None` values are omitted from the wire format. Repeating elements (`Vec<T>`) are never wrapped — an empty `Vec` already represents absence.
 - **XSD → Rust type mapping** — `xs:string` → `String`, `xs:int` → `i32`, `xs:long` → `i64`, `xs:float`/`xs:double`/`xs:decimal` → `f64`, `xs:boolean` → `bool`, `xs:date`/`xs:dateTime` → `String`.
 - **SOAP 1.1 & 1.2 support** — version is per-operation (`const VERSION: SoapVersion`) and auto-detected from the WSDL binding namespace. 1.1 uses `text/xml` + `SOAPAction`; 1.2 uses `application/soap+xml` with the action in the Content-Type parameter, and parses the 1.2 fault structure (`<Code><Value>` / `<Reason><Text>`).
 - **Fault detection on any HTTP status** — non-2xx responses are still read and checked for a SOAP fault body before reporting `HttpStatus`.

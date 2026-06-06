@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:wsdlsoap="http://schemas.xmlsoap.org/wsdl/soap/"
+             xmlns:tns="http://example.com/cust"
+             targetNamespace="http://example.com/cust">
+  <types>
+    <xs:schema targetNamespace="http://example.com/cust"
+               xmlns:xs="http://www.w3.org/2001/XMLSchema">
+      <xs:element name="GetCustomerRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="id"          type="xs:int"/>
+            <xs:element name="middleName"  type="xs:string" minOccurs="0"/>
+            <xs:element name="deathDate"   type="xs:date"   nillable="true"/>
+            <xs:element name="tag"         type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="GetCustomerResponse">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="status" type="xs:string"/>
+            <xs:element name="note"   type="xs:string" minOccurs="0"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:schema>
+  </types>
+  <message name="GetCustomerRequest">
+    <part name="parameters" element="tns:GetCustomerRequest"/>
+  </message>
+  <message name="GetCustomerResponse">
+    <part name="parameters" element="tns:GetCustomerResponse"/>
+  </message>
+  <portType name="CustomerPortType">
+    <operation name="GetCustomer">
+      <input  message="tns:GetCustomerRequest"/>
+      <output message="tns:GetCustomerResponse"/>
+    </operation>
+  </portType>
+  <binding name="CustomerBinding" type="tns:CustomerPortType">
+    <wsdlsoap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="GetCustomer">
+      <wsdlsoap:operation soapAction="http://example.com/cust/GetCustomer"/>
+      <input><wsdlsoap:body use="literal"/></input>
+      <output><wsdlsoap:body use="literal"/></output>
+    </operation>
+  </binding>
+  <service name="CustomerService">
+    <port name="CustomerPort" binding="tns:CustomerBinding">
+      <wsdlsoap:address location="http://localhost/cust"/>
+    </port>
+  </service>
+</definitions>
