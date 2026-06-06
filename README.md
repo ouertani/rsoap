@@ -82,6 +82,7 @@ The certificate is presented on every request, satisfying the transport-binding 
 - **Fault detection on any HTTP status** — non-2xx responses are still read and checked for a SOAP fault body before reporting `HttpStatus`.
 - **WS-Security transport binding (mTLS)** — opt-in via the `wss` Cargo feature. Loads a PEM-encoded client certificate + key and presents it on every request, matching the "two-way SSL over HTTP" requirement from OASIS WSS 1.1.
 - **Custom headers** — `.with_header(name, value)` for auth, tracing, etc.
+- **Request / response logging hook** — `.with_logger(|dir, xml| …)` captures the outbound SOAP envelope and the raw inbound response body, with no need for an external TLS proxy. Useful for debugging or feeding a structured log pipeline.
 - **Namespace-prefix tolerant** — handles `xs:`, `xsd:`, `wsdl:`, `soap:`, `wsdlsoap:`, `env:`, and bare tags in WSDLs.
 
 ---

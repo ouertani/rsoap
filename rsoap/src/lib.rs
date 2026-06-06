@@ -42,7 +42,7 @@ pub mod envelope;
 pub mod error;
 
 // Re-export core types at crate root for ergonomic access.
-pub use self::client::{SoapClient, SoapOperation};
+pub use self::client::{LogDirection, SoapClient, SoapLogger, SoapOperation};
 pub use self::envelope::SoapVersion;
 pub use self::error::{CertError, SoapError};
 
