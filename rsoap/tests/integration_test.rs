@@ -639,7 +639,10 @@ async fn logger_captures_request_and_response_in_order() {
     let client = SoapClient::new(mock_server.uri())
         .unwrap()
         .with_logger(move |dir, xml| {
-            captured_for_logger.lock().unwrap().push((dir, xml.to_string()));
+            captured_for_logger
+                .lock()
+                .unwrap()
+                .push((dir, xml.to_string()));
         });
 
     let _ = client
@@ -705,7 +708,10 @@ async fn logger_captures_fault_response_body() {
     let client = SoapClient::new(mock_server.uri())
         .unwrap()
         .with_logger(move |dir, xml| {
-            captured_for_logger.lock().unwrap().push((dir, xml.to_string()));
+            captured_for_logger
+                .lock()
+                .unwrap()
+                .push((dir, xml.to_string()));
         });
 
     let err = client

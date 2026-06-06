@@ -491,7 +491,10 @@ mod logger_tests {
 
         // Invoke whatever logger is currently registered.
         (client.logger.as_ref().unwrap())(LogDirection::Request, "<x/>");
-        assert!(!*first_called.lock().unwrap(), "first logger should have been replaced");
+        assert!(
+            !*first_called.lock().unwrap(),
+            "first logger should have been replaced"
+        );
         assert!(*second_called.lock().unwrap());
     }
 
