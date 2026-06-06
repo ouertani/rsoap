@@ -438,18 +438,10 @@ fn generate_from_wsdl(op: &WsdlOperation, struct_name: &syn::Ident) -> TokenStre
     let body_element = &op.body_element;
 
     // Build request field tokens with #[serde(rename)] for correct XML element names.
-    let request_fields: Vec<TokenStream2> = op
-        .request_fields
-        .iter()
-        .map(render_field)
-        .collect();
+    let request_fields: Vec<TokenStream2> = op.request_fields.iter().map(render_field).collect();
 
     // Build response field tokens.
-    let response_fields: Vec<TokenStream2> = op
-        .response_fields
-        .iter()
-        .map(render_field)
-        .collect();
+    let response_fields: Vec<TokenStream2> = op.response_fields.iter().map(render_field).collect();
 
     let action = &op.action;
     let endpoint = &op.endpoint;
@@ -937,7 +929,10 @@ mod tests {
         </xs:schema>"#;
         let map = build_element_map(wsdl);
         let f = &map.get("Req").unwrap()[0];
-        assert!(f.is_optional, "nillable=\"true\" should mark field optional");
+        assert!(
+            f.is_optional,
+            "nillable=\"true\" should mark field optional"
+        );
         assert_eq!(f.rust_type, "String");
     }
 
@@ -1078,9 +1073,15 @@ mod tests {
         };
         let rendered = render_field(&f).to_string();
         assert!(rendered.contains("Option < String >"), "actual: {rendered}");
-        assert!(rendered.contains("rename = \"middleName\""), "actual: {rendered}");
+        assert!(
+            rendered.contains("rename = \"middleName\""),
+            "actual: {rendered}"
+        );
         assert!(rendered.contains("default"), "actual: {rendered}");
-        assert!(rendered.contains("skip_serializing_if"), "actual: {rendered}");
+        assert!(
+            rendered.contains("skip_serializing_if"),
+            "actual: {rendered}"
+        );
         assert!(
             rendered.contains("\"Option::is_none\""),
             "actual: {rendered}"

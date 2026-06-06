@@ -521,7 +521,10 @@ mod optional_nillable {
     use rsoap::SoapOperationMacro;
 
     #[derive(SoapOperationMacro)]
-    #[soap(wsdl = "rsoap/tests/wsdl/customer.wsdl", operation_name = "GetCustomer")]
+    #[soap(
+        wsdl = "rsoap/tests/wsdl/customer.wsdl",
+        operation_name = "GetCustomer"
+    )]
     #[allow(dead_code)]
     pub struct GetCustomer;
 
@@ -576,7 +579,10 @@ mod optional_nillable {
             tag: Vec::new(),
         };
         let xml = quick_xml::se::to_string_with_root("Req", &req).unwrap();
-        assert!(xml.contains("<middleName>Quentin</middleName>"), "xml: {xml}");
+        assert!(
+            xml.contains("<middleName>Quentin</middleName>"),
+            "xml: {xml}"
+        );
         assert!(
             xml.contains("<deathDate>2010-05-12</deathDate>"),
             "xml: {xml}"
@@ -595,7 +601,8 @@ mod optional_nillable {
 
     #[test]
     fn response_with_present_optional_field_deserializes_to_some() {
-        let xml = "<GetCustomerResponse><status>OK</status><note>hello</note></GetCustomerResponse>";
+        let xml =
+            "<GetCustomerResponse><status>OK</status><note>hello</note></GetCustomerResponse>";
         let resp: getcustomer::GetCustomerResponse = quick_xml::de::from_str(xml).unwrap();
         assert_eq!(resp.status, "OK");
         assert_eq!(resp.note.as_deref(), Some("hello"));
