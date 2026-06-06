@@ -20,6 +20,10 @@ struct WsdlField {
     rust_name: String, // snake_case identifier
     xml_name: String,  /* original camelCase or XSD name for #[serde(rename)] */
     rust_type: String, // e.g. `String`, `i32`, `Vec<String>`
+    /// `true` if the XSD element has `minOccurs="0"` or `nillable="true"`.
+    /// Repeating elements (`Vec<T>`) are never marked optional — an empty
+    /// vector already represents absence.
+    is_optional: bool,
 }
 
 /// Parsed SOAP operation from WSDL.
@@ -154,6 +158,7 @@ fn build_element_map(wsdl: &str) -> std::collections::HashMap<String, Vec<WsdlFi
                                 rust_name: camel_to_snake(&elem_name),
                                 xml_name: elem_name,
                                 rust_type: "String".into(),
+                                is_optional: false,
                             }],
                         );
                     }
@@ -188,15 +193,33 @@ fn parse_complex_type(content: &str) -> Vec<WsdlField> {
                     let xsd_type = xsd_type_raw.as_deref().unwrap_or("xs:string");
 
                     let max_occurs = extract_attribute(&elem.open, "maxOccurs");
-                    let rust_ty = match max_occurs.as_deref() {
-                        Some("unbounded") => format!("Vec<{}>", xsd_to_rust(xsd_type)),
-                        _ => xsd_to_rust(xsd_type).into(),
+                    let min_occurs = extract_attribute(&elem.open, "minOccurs");
+                    let nillable = extract_attribute(&elem.open, "nillable");
+
+                    let is_repeating = matches!(max_occurs.as_deref(), Some("unbounded"))
+                        || max_occurs
+                            .as_deref()
+                            .and_then(|s| s.parse::<u32>().ok())
+                            .is_some_and(|n| n > 1);
+
+                    let rust_ty = if is_repeating {
+                        format!("Vec<{}>", xsd_to_rust(xsd_type))
+                    } else {
+                        xsd_to_rust(xsd_type).into()
                     };
+
+                    // Optional if minOccurs="0" or nillable="true". Repeating
+                    // elements are never wrapped in Option — an empty Vec is
+                    // the natural "absent" representation.
+                    let is_optional = !is_repeating
+                        && (matches!(min_occurs.as_deref(), Some("0"))
+                            || matches!(nillable.as_deref(), Some("true")));
 
                     fields.push(WsdlField {
                         rust_name: camel_to_snake(&name),
                         xml_name: name,
                         rust_type: rust_ty,
+                        is_optional,
                     });
                 }
             }
@@ -375,6 +398,7 @@ mod resolution {
                         rust_name,
                         xml_name: msg_name.to_string(),
                         rust_type: "String".to_string(),
+                        is_optional: false,
                     });
                 }
             }
@@ -384,6 +408,29 @@ mod resolution {
 
 // ─────────── Code generation ───────────
 
+/// Render a single struct field as a token stream, wrapping optional fields
+/// in `Option<T>` and adding `skip_serializing_if` + `default` so that
+/// `minOccurs="0"` / `nillable="true"` elements can be both absent on the
+/// wire and missing from the response without breaking deserialization.
+fn render_field(f: &WsdlField) -> TokenStream2 {
+    let ident = format_ident!("{}", f.rust_name);
+    let rename = &f.xml_name;
+    let ty: syn::Type = syn::parse_str(&f.rust_type)
+        .unwrap_or_else(|_| syn::parse_str("String").expect("String is a valid type"));
+
+    if f.is_optional {
+        quote! {
+            #[serde(rename = #rename, default, skip_serializing_if = "Option::is_none")]
+            pub #ident: Option<#ty>
+        }
+    } else {
+        quote! {
+            #[serde(rename = #rename)]
+            pub #ident: #ty
+        }
+    }
+}
+
 fn generate_from_wsdl(op: &WsdlOperation, struct_name: &syn::Ident) -> TokenStream2 {
     let mod_name = format_ident!("{}", op.name.to_lowercase());
     let req_struct = format_ident!("{}Request", op.name);
@@ -391,28 +438,10 @@ fn generate_from_wsdl(op: &WsdlOperation, struct_name: &syn::Ident) -> TokenStre
     let body_element = &op.body_element;
 
     // Build request field tokens with #[serde(rename)] for correct XML element names.
-    let request_fields: Vec<TokenStream2> = op
-        .request_fields
-        .iter()
-        .map(|f| {
-            let ident = format_ident!("{}", f.rust_name);
-            let rust_ty = &f.rust_type;
-            let rename = &f.xml_name;
-            quote! { #[serde(rename = #rename)] pub #ident: #rust_ty }
-        })
-        .collect();
+    let request_fields: Vec<TokenStream2> = op.request_fields.iter().map(render_field).collect();
 
     // Build response field tokens.
-    let response_fields: Vec<TokenStream2> = op
-        .response_fields
-        .iter()
-        .map(|f| {
-            let ident = format_ident!("{}", f.rust_name);
-            let rust_ty = &f.rust_type;
-            let rename = &f.xml_name;
-            quote! { #[serde(rename = #rename)] pub #ident: #rust_ty }
-        })
-        .collect();
+    let response_fields: Vec<TokenStream2> = op.response_fields.iter().map(render_field).collect();
 
     let action = &op.action;
     let endpoint = &op.endpoint;
@@ -848,6 +877,304 @@ mod tests {
             !op.request_fields.is_empty(),
             "should resolve at least one request field"
         );
+    }
+
+    // ─────────── Optional & nillable element support ───────────
+
+    #[test]
+    fn required_field_is_not_optional() {
+        let wsdl = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+            <xs:element name="Req">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="id" type="xs:int"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:schema>"#;
+        let map = build_element_map(wsdl);
+        let f = &map.get("Req").unwrap()[0];
+        assert!(!f.is_optional);
+        assert_eq!(f.rust_type, "i32");
+    }
+
+    #[test]
+    fn min_occurs_zero_maps_to_optional() {
+        let wsdl = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+            <xs:element name="Req">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="middleName" type="xs:string" minOccurs="0"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:schema>"#;
+        let map = build_element_map(wsdl);
+        let f = &map.get("Req").unwrap()[0];
+        assert!(f.is_optional, "minOccurs=\"0\" should mark field optional");
+        assert_eq!(f.rust_type, "String");
+        assert_eq!(f.rust_name, "middle_name");
+    }
+
+    #[test]
+    fn nillable_true_maps_to_optional() {
+        let wsdl = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+            <xs:element name="Req">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="deathDate" type="xs:date" nillable="true"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:schema>"#;
+        let map = build_element_map(wsdl);
+        let f = &map.get("Req").unwrap()[0];
+        assert!(
+            f.is_optional,
+            "nillable=\"true\" should mark field optional"
+        );
+        assert_eq!(f.rust_type, "String");
+    }
+
+    #[test]
+    fn min_occurs_zero_and_nillable_true_is_optional_once() {
+        let wsdl = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+            <xs:element name="Req">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="note" type="xs:string"
+                                    minOccurs="0" nillable="true"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:schema>"#;
+        let map = build_element_map(wsdl);
+        let f = &map.get("Req").unwrap()[0];
+        assert!(f.is_optional);
+        assert_eq!(f.rust_type, "String");
+        assert!(
+            !f.rust_type.starts_with("Option<"),
+            "rust_type stores the inner type; codegen wraps in Option<T>"
+        );
+    }
+
+    #[test]
+    fn min_occurs_one_explicit_is_not_optional() {
+        let wsdl = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+            <xs:element name="Req">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="id" type="xs:int" minOccurs="1"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:schema>"#;
+        let map = build_element_map(wsdl);
+        assert!(!map.get("Req").unwrap()[0].is_optional);
+    }
+
+    #[test]
+    fn nillable_false_is_not_optional() {
+        let wsdl = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+            <xs:element name="Req">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="id" type="xs:int" nillable="false"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:schema>"#;
+        let map = build_element_map(wsdl);
+        assert!(!map.get("Req").unwrap()[0].is_optional);
+    }
+
+    #[test]
+    fn unbounded_with_min_occurs_zero_stays_vec_not_option() {
+        // Repeating elements use Vec<T>; empty Vec already represents absence.
+        let wsdl = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+            <xs:element name="Req">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="tag" type="xs:string"
+                                    minOccurs="0" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:schema>"#;
+        let map = build_element_map(wsdl);
+        let f = &map.get("Req").unwrap()[0];
+        assert_eq!(f.rust_type, "Vec<String>");
+        assert!(
+            !f.is_optional,
+            "Vec<T> fields must not be wrapped in Option<Vec<T>>"
+        );
+    }
+
+    #[test]
+    fn bounded_max_occurs_greater_than_one_is_vec() {
+        let wsdl = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+            <xs:element name="Req">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="phone" type="xs:string" maxOccurs="5"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:schema>"#;
+        let map = build_element_map(wsdl);
+        let f = &map.get("Req").unwrap()[0];
+        assert_eq!(f.rust_type, "Vec<String>");
+        assert!(!f.is_optional);
+    }
+
+    #[test]
+    fn mixed_required_optional_and_nillable_fields() {
+        let wsdl = r#"<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+            <xs:element name="Customer">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="id"         type="xs:int"/>
+                        <xs:element name="middleName" type="xs:string" minOccurs="0"/>
+                        <xs:element name="deathDate"  type="xs:date"   nillable="true"/>
+                        <xs:element name="tags"       type="xs:string"
+                                    minOccurs="0" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:schema>"#;
+        let map = build_element_map(wsdl);
+        let fields = map.get("Customer").unwrap();
+        assert_eq!(fields.len(), 4);
+
+        assert_eq!(fields[0].rust_name, "id");
+        assert_eq!(fields[0].rust_type, "i32");
+        assert!(!fields[0].is_optional);
+
+        assert_eq!(fields[1].rust_name, "middle_name");
+        assert_eq!(fields[1].rust_type, "String");
+        assert!(fields[1].is_optional);
+
+        assert_eq!(fields[2].rust_name, "death_date");
+        assert_eq!(fields[2].rust_type, "String");
+        assert!(fields[2].is_optional);
+
+        assert_eq!(fields[3].rust_name, "tags");
+        assert_eq!(fields[3].rust_type, "Vec<String>");
+        assert!(!fields[3].is_optional);
+    }
+
+    #[test]
+    fn render_field_wraps_optional_in_option_with_skip_serializing() {
+        let f = WsdlField {
+            rust_name: "middle_name".into(),
+            xml_name: "middleName".into(),
+            rust_type: "String".into(),
+            is_optional: true,
+        };
+        let rendered = render_field(&f).to_string();
+        assert!(rendered.contains("Option < String >"), "actual: {rendered}");
+        assert!(
+            rendered.contains("rename = \"middleName\""),
+            "actual: {rendered}"
+        );
+        assert!(rendered.contains("default"), "actual: {rendered}");
+        assert!(
+            rendered.contains("skip_serializing_if"),
+            "actual: {rendered}"
+        );
+        assert!(
+            rendered.contains("\"Option::is_none\""),
+            "actual: {rendered}"
+        );
+    }
+
+    #[test]
+    fn render_field_required_has_no_option_wrapper() {
+        let f = WsdlField {
+            rust_name: "id".into(),
+            xml_name: "id".into(),
+            rust_type: "i32".into(),
+            is_optional: false,
+        };
+        let rendered = render_field(&f).to_string();
+        assert!(!rendered.contains("Option <"));
+        assert!(!rendered.contains("skip_serializing_if"));
+        assert!(rendered.contains("rename = \"id\""));
+        assert!(rendered.contains("pub id : i32"));
+    }
+
+    #[test]
+    fn render_field_handles_vec_type_without_option() {
+        let f = WsdlField {
+            rust_name: "tags".into(),
+            xml_name: "tags".into(),
+            rust_type: "Vec<String>".into(),
+            is_optional: false,
+        };
+        let rendered = render_field(&f).to_string();
+        assert!(rendered.contains("Vec < String >"));
+        assert!(!rendered.contains("Option <"));
+    }
+
+    #[test]
+    fn full_wsdl_with_optional_and_nillable_elements() {
+        let wsdl = r#"<?xml version="1.0"?>
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:ns="http://www.w3.org/2001/XMLSchema"
+             targetNamespace="http://example.com/cust">
+  <types>
+    <xs:schema targetNamespace="http://example.com/cust"
+               xmlns:xs="http://www.w3.org/2001/XMLSchema">
+      <xs:element name="GetCustomerRequest">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="id"          type="xs:int"/>
+            <xs:element name="middleName"  type="xs:string" minOccurs="0"/>
+            <xs:element name="deathDate"   type="xs:date"   nillable="true"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:schema>
+  </types>
+  <message name="GetCustomerRequest">
+    <part name="parameters" element="ns:GetCustomerRequest"/>
+  </message>
+  <portType name="CustPT">
+    <operation name="GetCustomer">
+      <input message="ns:GetCustomerRequest"/>
+    </operation>
+  </portType>
+  <binding name="CustB" type="ns:CustPT">
+    <wsdlsoap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="GetCustomer">
+      <wsdlsoap:operation soapAction="http://example.com/cust/GetCustomer"/>
+      <input><wsdlsoap:body use="literal"/></input>
+    </operation>
+  </binding>
+  <service name="CustSvc">
+    <port name="CustPort" binding="ns:CustB">
+      <wsdlsoap:address location="http://localhost/cust"/>
+    </port>
+  </service>
+</definitions>"#;
+
+        let parsed = ParsedWsdl::parse(wsdl);
+        let op = parsed
+            .operations
+            .iter()
+            .find(|o| o.name == "GetCustomer")
+            .expect("GetCustomer should be parsed");
+
+        let by_name = |n: &str| {
+            op.request_fields
+                .iter()
+                .find(|f| f.rust_name == n)
+                .unwrap_or_else(|| panic!("field {n} not found"))
+        };
+
+        assert!(!by_name("id").is_optional);
+        assert!(by_name("middle_name").is_optional);
+        assert!(by_name("death_date").is_optional);
     }
 
     #[test]
