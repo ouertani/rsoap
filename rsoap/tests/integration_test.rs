@@ -608,3 +608,149 @@ mod optional_nillable {
         assert_eq!(resp.note.as_deref(), Some("hello"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Logger hook
+// ---------------------------------------------------------------------------
+
+/// End-to-end: registered logger receives the outbound envelope and the
+/// inbound response body in the correct order.
+#[tokio::test]
+async fn logger_captures_request_and_response_in_order() {
+    use std::sync::{Arc, Mutex};
+
+    let mock_server = wiremock::MockServer::start().await;
+    let soap_response = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+            <soap:Body>
+                <GetWeatherResponse>
+                    <temperature>55.0</temperature>
+                </GetWeatherResponse>
+            </soap:Body>
+        </soap:Envelope>"#;
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(soap_response))
+        .mount(&mock_server)
+        .await;
+
+    let captured: Arc<Mutex<Vec<(rsoap::LogDirection, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_logger = Arc::clone(&captured);
+
+    let client = SoapClient::new(mock_server.uri())
+        .unwrap()
+        .with_logger(move |dir, xml| {
+            captured_for_logger.lock().unwrap().push((dir, xml.to_string()));
+        });
+
+    let _ = client
+        .call(
+            &TestOp,
+            &WeatherReqE2e {
+                zip_code: "11111".into(),
+            },
+        )
+        .await
+        .expect("call should succeed");
+
+    let log = captured.lock().unwrap();
+    assert_eq!(log.len(), 2, "logger should be called exactly twice");
+
+    // First call: outbound request.
+    assert_eq!(log[0].0, rsoap::LogDirection::Request);
+    assert!(
+        log[0].1.contains("soap:Envelope"),
+        "request log should contain envelope, got: {}",
+        log[0].1
+    );
+    assert!(
+        log[0].1.contains("11111"),
+        "request log should contain request body, got: {}",
+        log[0].1
+    );
+
+    // Second call: inbound response.
+    assert_eq!(log[1].0, rsoap::LogDirection::Response);
+    assert!(
+        log[1].1.contains("GetWeatherResponse"),
+        "response log should contain response body, got: {}",
+        log[1].1
+    );
+    assert!(log[1].1.contains("55.0"));
+}
+
+/// Logger still fires for the response when the server returns a SOAP fault,
+/// so users can debug fault payloads.
+#[tokio::test]
+async fn logger_captures_fault_response_body() {
+    use std::sync::{Arc, Mutex};
+
+    let mock_server = wiremock::MockServer::start().await;
+    let soap_fault = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+            <soap:Body>
+                <soap:Fault>
+                    <faultcode>Server</faultcode>
+                    <faultstring>boom</faultstring>
+                </soap:Fault>
+            </soap:Body>
+        </soap:Envelope>"#;
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(wiremock::ResponseTemplate::new(500).set_body_string(soap_fault))
+        .mount(&mock_server)
+        .await;
+
+    let captured: Arc<Mutex<Vec<(rsoap::LogDirection, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let captured_for_logger = Arc::clone(&captured);
+
+    let client = SoapClient::new(mock_server.uri())
+        .unwrap()
+        .with_logger(move |dir, xml| {
+            captured_for_logger.lock().unwrap().push((dir, xml.to_string()));
+        });
+
+    let err = client
+        .call(
+            &TestOp,
+            &WeatherReqE2e {
+                zip_code: "11111".into(),
+            },
+        )
+        .await
+        .expect_err("server returned a fault");
+    assert!(matches!(err, rsoap::SoapError::SoapFault { .. }));
+
+    let log = captured.lock().unwrap();
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[1].0, rsoap::LogDirection::Response);
+    assert!(log[1].1.contains("boom"));
+}
+
+/// A client with no logger registered must continue to work unchanged.
+#[tokio::test]
+async fn no_logger_does_not_affect_behavior() {
+    let mock_server = wiremock::MockServer::start().await;
+    let soap_response = r#"<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+            <soap:Body>
+                <GetWeatherResponse>
+                    <temperature>21.0</temperature>
+                </GetWeatherResponse>
+            </soap:Body>
+        </soap:Envelope>"#;
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(soap_response))
+        .mount(&mock_server)
+        .await;
+
+    let client = SoapClient::new(mock_server.uri()).unwrap();
+    let rsp = client
+        .call(
+            &TestOp,
+            &WeatherReqE2e {
+                zip_code: "22222".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(rsp.temperature, 21.0);
+}
