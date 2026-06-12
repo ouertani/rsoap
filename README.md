@@ -83,6 +83,7 @@ The certificate is presented on every request, satisfying the transport-binding 
 - **WS-Security transport binding (mTLS)** — opt-in via the `wss` Cargo feature. Loads a PEM-encoded client certificate + key and presents it on every request, matching the "two-way SSL over HTTP" requirement from OASIS WSS 1.1.
 - **Custom headers** — `.with_header(name, value)` for auth, tracing, etc.
 - **Request / response logging hook** — `.with_logger(|dir, xml| …)` captures the outbound SOAP envelope and the raw inbound response body, with no need for an external TLS proxy. Useful for debugging or feeding a structured log pipeline.
+- **Per-request timeout** — `.with_timeout(Duration)` bounds every `call(...)` (connect + send + read). Without it a hung server blocks the calling task indefinitely. Composes with mTLS regardless of builder call order.
 - **Namespace-prefix tolerant** — handles `xs:`, `xsd:`, `wsdl:`, `soap:`, `wsdlsoap:`, `env:`, and bare tags in WSDLs.
 
 ---

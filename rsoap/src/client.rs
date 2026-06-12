@@ -12,6 +12,7 @@ use reqwest::Client as HttpClient;
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Direction of a SOAP message passed to a logging hook.
 ///
@@ -107,6 +108,7 @@ pub struct SoapClient {
     endpoint: String,
     default_headers: HashMap<String, String>,
     logger: Option<SoapLogger>,
+    timeout: Option<Duration>,
 }
 
 impl SoapClient {
@@ -127,6 +129,7 @@ impl SoapClient {
             endpoint,
             default_headers: HashMap::new(),
             logger: None,
+            timeout: None,
         })
     }
 
@@ -139,6 +142,34 @@ impl SoapClient {
     /// Set custom headers from a map.
     pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
         self.default_headers.extend(headers);
+        self
+    }
+
+    /// Set a per-request timeout applied to every [`call`](Self::call).
+    ///
+    /// The timeout covers the full request — connect, send, and reading the
+    /// response body. If it elapses, `call` returns a [`SoapError`] wrapping a
+    /// timed-out [`reqwest::Error`]. With no timeout set (the default), a
+    /// request waits indefinitely, so a hung server blocks the calling task.
+    ///
+    /// Because the timeout is applied per request rather than by rebuilding the
+    /// underlying HTTP client, it composes with mTLS configured via
+    /// [`with_client_cert`](Self::with_client_cert) or
+    /// [`with_identity`](Self::with_identity) regardless of call order.
+    /// Calling this method again replaces the previous value.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use rsoap::SoapClient;
+    /// use std::time::Duration;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = SoapClient::new("https://example.com/soap")?
+    ///     .with_timeout(Duration::from_secs(30));
+    /// # Ok(()) }
+    /// ```
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
         self
     }
 
@@ -287,6 +318,10 @@ impl SoapClient {
             request_builder = request_builder.header(key.as_str(), value.as_str());
         }
 
+        if let Some(timeout) = self.timeout {
+            request_builder = request_builder.timeout(timeout);
+        }
+
         if let Some(logger) = &self.logger {
             logger(LogDirection::Request, &xml_body);
         }
@@ -337,6 +372,7 @@ impl std::fmt::Debug for SoapClient {
         }
 
         ds.field("logger", &self.logger.as_ref().map(|_| "<fn>"));
+        ds.field("timeout", &self.timeout);
 
         ds.finish()
     }
@@ -535,5 +571,44 @@ mod logger_tests {
         (client.logger.as_ref().unwrap())(LogDirection::Request, "");
         (cloned.logger.as_ref().unwrap())(LogDirection::Response, "");
         assert_eq!(*calls.lock().unwrap(), 2);
+    }
+}
+
+// ─────────── Timeout unit tests ───────────
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    #[test]
+    fn default_client_has_no_timeout() {
+        let client = SoapClient::new("https://example.com/soap").unwrap();
+        assert!(client.timeout.is_none());
+    }
+
+    #[test]
+    fn with_timeout_sets_value() {
+        let client = SoapClient::new("https://example.com/soap")
+            .unwrap()
+            .with_timeout(Duration::from_secs(15));
+        assert_eq!(client.timeout, Some(Duration::from_secs(15)));
+    }
+
+    #[test]
+    fn with_timeout_replaces_previous_value() {
+        let client = SoapClient::new("https://example.com/soap")
+            .unwrap()
+            .with_timeout(Duration::from_secs(5))
+            .with_timeout(Duration::from_secs(30));
+        assert_eq!(client.timeout, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn debug_impl_shows_timeout() {
+        let plain = SoapClient::new("https://example.com").unwrap();
+        let with_to = SoapClient::new("https://example.com")
+            .unwrap()
+            .with_timeout(Duration::from_secs(7));
+        assert!(format!("{plain:?}").contains("timeout"));
+        assert!(format!("{with_to:?}").contains("7s"));
     }
 }
