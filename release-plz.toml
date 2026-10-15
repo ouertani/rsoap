@@ -1,0 +1,27 @@
+# release-plz configuration.
+# Docs: https://release-plz.dev/docs/config
+#
+# How it works:
+# - On push to main, `release-pr` opens/updates a Release PR with version
+#   bumps + changelogs (conventional commits drive the semver increment).
+# - Merging the Release PR triggers `release`, which publishes to crates.io,
+#   tags (e.g. `rsoap-v0.4.1`), and creates GitHub releases.
+
+[workspace]
+# Keep `rsoap` and `rsoap-macros` in lockstep: they share
+# `workspace.package.version`, so they must release together.
+# `rsoap-examples` is skipped automatically (`publish = false` in its Cargo.toml).
+changelog_update = true
+git_release_enable = true
+pr_labels = ["release"]
+publish_allow_dirty = false
+publish_timeout = "10m"
+semver_check = true
+
+[[package]]
+name = "rsoap"
+version_group = "rsoap"
+
+[[package]]
+name = "rsoap-macros"
+version_group = "rsoap"
