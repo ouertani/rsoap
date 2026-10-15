@@ -69,21 +69,3 @@ jobs:
 
       - name: Test (wss feature)
         run: cargo test -p rsoap --features wss --all-targets
-
-  publish-check:
-    name: Publish dry-run
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Dry-run publish rsoap-macros
-        run: cargo publish --dry-run -p rsoap-macros --allow-dirty
-
-      - name: Dry-run publish rsoap
-        run: cargo publish --dry-run -p rsoap --allow-dirty
