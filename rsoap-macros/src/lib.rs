@@ -647,6 +647,9 @@ fn extract_tag_content(wsdl: &str, tag: &str) -> Option<String> {
 
 /// Find all occurrences of `<tag ...>...</tag>` or self-closing `<tag .../>`
 /// inside **wsdl**.  Handles namespace prefixes (`xs:tag`, `xsd:tag`).
+///
+/// It does not report nested elements: It finds the tag at any depth, and reports it up to its
+/// closing tag, but it will not report instances of tag that occur within that.
 fn extract_tag_contents(wsdl: &str, tag: &str) -> Vec<TagMatch> {
     let open_pat = format!("<{}", tag);
     let close_tag = format!("</{}>", tag);
@@ -678,9 +681,45 @@ fn extract_tag_contents(wsdl: &str, tag: &str) -> Vec<TagMatch> {
             continue;
         }
 
+        // Seek ahead until we are sure to not be misled by closing elements.
+        let mut cursor = body_end_abs;
+        let mut nesting = 0;
+        loop {
+            let next_open = wsdl[cursor..].find(&open_pat);
+            let next_close = wsdl[cursor..].find(&close_tag);
+            let (Some(next_open), Some(next_close)) = (next_open, next_close) else {
+                assert!(
+                    nesting == 0,
+                    "Invalid XML nesting or surprising self-closing tag"
+                );
+                break;
+            };
+            if next_open < next_close {
+                // Could be self-closing…
+                if wsdl[cursor + next_open..].find("/>").unwrap_or(usize::MAX)
+                    > wsdl[cursor + next_open..].find(">").unwrap_or(usize::MAX)
+                {
+                    // … so only if it is not, we go deeper …
+                    nesting += 1;
+                }
+                // … but either way:
+                cursor += next_open + 1;
+                continue;
+            } else {
+                if nesting == 0 {
+                    // This will be found again correctly after the loop
+                    break;
+                } else {
+                    nesting -= 1;
+                    cursor += next_close + 1;
+                    continue;
+                }
+            }
+        }
+
         // Extract the body between open and close tags
-        if let Some(body_end_rel) = wsdl[body_end_abs..].find(&close_tag) {
-            let abs_body_end = body_end_abs + body_end_rel;
+        if let Some(body_end_rel) = wsdl[cursor..].find(&close_tag) {
+            let abs_body_end = cursor + body_end_rel;
             let inner = wsdl[body_end_abs..abs_body_end].trim().to_string();
             result.push(TagMatch {
                 open: open_text,
